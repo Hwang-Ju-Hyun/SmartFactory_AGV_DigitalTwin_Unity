@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
+using Unity.AppUI.UI;
 using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.Experimental.AI;
 using static UnityEditor.Experimental.GraphView.Port;
 
 public class OutputMemoryStream
@@ -50,6 +53,7 @@ public class OutputMemoryStream
     public void WriteByte(byte _data)
     {
         byte[] singleByte = new byte[1];
+        singleByte[0] = _data;
         Write(singleByte, 1);
     }    
     public void WriteShort(short _data)
@@ -57,6 +61,13 @@ public class OutputMemoryStream
         byte[] bytes = BitConverter.GetBytes(_data);
         Write(bytes, sizeof(short));
     }
+
+    public void WriteFloat(float _data)
+    {
+        byte[] bytes=BitConverter.GetBytes(_data);
+        Write(bytes,sizeof(float));
+    }
+
     public void WriteUInt32(UInt32 _data)
     {
         byte[] bytes= BitConverter.GetBytes(_data);
@@ -73,7 +84,7 @@ public class OutputMemoryStream
         
         WriteShort((short)bytes.Length);
         Write(bytes, bytes.Length);
-    }
+    }   
 }
 public class InputMemoryStream
 {
@@ -106,10 +117,61 @@ public class InputMemoryStream
         return val;
     }
 
+    public float ReadFloat()
+    {
+        float val =BitConverter.ToSingle(m_Buffer, m_Head);
+        m_Head += 4;
+        return val;
+    }
+
     public string ReadString(int _length)
     {
         string val = Encoding.UTF8.GetString(m_Buffer, m_Head, _length);
         m_Head += _length;
         return val;
+    }
+
+    public List<Node> ReadNodes()
+    {
+        List<Node> nodes=new List<Node>();
+        UInt32 length = ReadUInt32();        
+        for(int i=0;i<length;i++)
+        {
+            UInt32 id = ReadUInt32();
+            float PosX = ReadFloat();
+            float PosY = ReadFloat();
+            byte type = ReadByte();
+            
+            Node node = new Node();
+            node.m_Id = id;
+            node.m_PosX = PosX;
+            node.m_PosY = PosY;
+            node.type = type;
+
+            nodes.Add(node);
+        }
+        
+        return nodes;
+    }
+
+    public List<Link> ReadLinks()
+    {        
+        List<Link> links = new List<Link>();
+        UInt32 length = ReadUInt32();
+        for (int i = 0; i < length; i++)
+        {
+            UInt32 id = ReadUInt32();
+            UInt32 FromNodeID = ReadUInt32();
+            UInt32 ToNodeID = ReadUInt32();            
+
+            Link link = new Link();
+            link.m_Id = id;
+            link.m_FromNodeID  = FromNodeID;
+            link.m_ToNodeID= ToNodeID;
+
+            links.Add(link);
+        }
+
+        return links;
     }
 }

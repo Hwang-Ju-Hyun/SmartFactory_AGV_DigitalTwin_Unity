@@ -27,8 +27,12 @@ public class TCPSession
                 {
                     //1. 패킷 사이즈
                     int headerReader = 0;
-                    int read = m_Stream.Read(m_SizeBuffer, headerReader, 2);
-                    headerReader += read;
+                    while (headerReader < 2)
+                    {
+                        int read = m_Stream.Read(m_SizeBuffer,headerReader,2 - headerReader);
+                        headerReader+= read;
+                    }
+                    
                     ushort packetSize = BitConverter.ToUInt16(m_SizeBuffer, 0);
 
                     //2. 패킷 바디
@@ -36,8 +40,8 @@ public class TCPSession
                     int totalRead = 0;
                     while (totalRead < bodyBuffer.Length)
                     {
-                        m_Stream.Read(bodyBuffer, totalRead, bodyBuffer.Length - totalRead);
-                        totalRead += bodyBuffer.Length;
+                        int bytesRead = m_Stream.Read(bodyBuffer, totalRead, bodyBuffer.Length - totalRead);
+                        totalRead += bytesRead;
                     }
 
                     //다모였으면

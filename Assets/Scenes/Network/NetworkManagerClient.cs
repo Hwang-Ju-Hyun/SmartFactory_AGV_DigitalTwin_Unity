@@ -6,8 +6,8 @@ using UnityEngine;
 public enum PACKET_TYPE : byte
 {    
     PT_REPLICATION = 0,
-    PT_TEST=1,    
-    PT_HELLO = 2,
+    PT_MAZE_DATA=1,
+    PT_HELLO = 2
 }
 
 public enum REPLICATION_ACTION:byte
@@ -94,6 +94,11 @@ public class NetworkManagerClient : MonoBehaviour
                     HandleHelloPacket_Recv(_inStream);
                     break;
                 }
+            case PACKET_TYPE.PT_MAZE_DATA:
+                {
+                    HandleMapDataPacket_Recv(_inStream);
+                    break;
+                }
             case PACKET_TYPE.PT_REPLICATION:
                 {
                     HandleReplicatePacket_Recv(_inStream);
@@ -102,14 +107,24 @@ public class NetworkManagerClient : MonoBehaviour
         }
     }
 
+    public void HandleMapDataPacket_Recv(InputMemoryStream _inStream)
+    {
+        Map.Instance.m_Nodes=_inStream.ReadNodes();
+        Map.Instance.m_Links=_inStream.ReadLinks();
+        
+        lock (m_Lock)
+        {
+            NetworkMapBuildEvent nbe = new NetworkMapBuildEvent(Map.Instance.m_Nodes, Map.Instance.m_Links);
+            m_NetworkEventQueue.Enqueue(nbe);
+        }
+        
+    }
+
     public void HandleHelloPacket_Recv(InputMemoryStream _inStream)
     {
-        Debug.Log($"<color=cyan> Hello packet</color>을 서버에게서 받았습니다!");
-        UInt32 networkID = _inStream.ReadUInt32();
-        UInt32 sessionID = _inStream.ReadUInt32();
-        Debug.Log($"<color=blue>Nework ID :</color>" + networkID);
-        Debug.Log($"<color=green>Session ID :</color>" + sessionID);
-        
+        Debug.Log($"<color=cyan> Hello packet</color>을 서버에게서 받았습니다!");        
+        UInt32 sessionID = _inStream.ReadUInt32();        
+        Debug.Log($"<color=green>Session ID :</color>" + sessionID);        
     }
 
     public void HandleReplicatePacket_Recv(InputMemoryStream _inStream)
@@ -127,7 +142,9 @@ public class NetworkManagerClient : MonoBehaviour
 
                         Object obj = ObjectRegistry.Instance.CreateObject(classID);                        
                         m_LinkingContext.AddObject(networkID, obj);
-                        
+
+                        obj.Read(_inStream);
+
                         lock(m_Lock)
                         {                            
                             NetworkSpawnEvent nse = new NetworkSpawnEvent(networkID, classID);
@@ -139,9 +156,16 @@ public class NetworkManagerClient : MonoBehaviour
                     {                        
                         Object obj = m_LinkingContext.GetObject(networkID);
                         obj.Read(_inStream);
+                        
+
                         Vector2 pos = new Vector2(obj.m_PosX, obj.m_PosY);
-                        NetworkUpdateEvent nue = new NetworkUpdateEvent(networkID, pos, Quaternion.identity);
-                        m_NetworkEventQueue.Enqueue(nue);
+                        Quaternion rot = obj.m_Rot;
+
+                        lock (m_Lock)
+                        {
+                            NetworkUpdateEvent nue = new NetworkUpdateEvent(networkID, pos, rot);
+                            m_NetworkEventQueue.Enqueue(nue);
+                        }                        
 
                         break;
                     }

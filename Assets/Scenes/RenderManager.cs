@@ -8,6 +8,7 @@ public class RenderManager:MonoBehaviour
     
     public GameObject agvPrefab;
     public GameObject defaultPrefab;
+    public GameObject nodePrefab;
 
     public void Awake()
     {
@@ -18,8 +19,10 @@ public class RenderManager:MonoBehaviour
 
             agvPrefab = Resources.Load<GameObject>("AGV_Prefab");
             defaultPrefab= Resources.Load<GameObject>("Default_Prefab");
+            nodePrefab = Resources.Load<GameObject>("Node_Prefab");
 
-            if (agvPrefab == null || defaultPrefab == null)
+
+            if (agvPrefab == null || defaultPrefab == null|| nodePrefab==null)
             {
                 Debug.LogError("[RenderManager] Resources 폴더에서 프리팹을 로드하는 데 실패했습니다!");
             }
@@ -47,12 +50,22 @@ public class RenderManager:MonoBehaviour
         Representaion_3D.name = $"3D_NetObj_[{_networkID}]";
         m_NetworkIDToGameObjectMap.Add(_networkID, Representaion_3D);
     }
-    public void UpdateObjectPosition(UInt32 _networkID, Vector2 _position)
+    public void UpdateObjectPosition(UInt32 _networkID, Vector2 _position,Quaternion _rot)
     { 
         if(m_NetworkIDToGameObjectMap.ContainsKey(_networkID))
         {
             m_NetworkIDToGameObjectMap[_networkID].transform.position = new Vector3(_position.x, 0.0f, _position.y);
+            m_NetworkIDToGameObjectMap[_networkID].transform.rotation = _rot;
         }
     }
-  
+
+    public void MapBuild(List<Node> _nodes,List<Link> _links)
+    {        
+        foreach(Node node in _nodes)
+        {
+            Vector3 nodePos = new Vector3(node.m_PosX, 0.05f, node.m_PosY);
+            GameObject nodeObj = Instantiate(nodePrefab, nodePos, Quaternion.identity);
+            nodeObj.name = $"Node_[{node.m_Id}]_Type_{node.type}";
+        }
+    }
 }

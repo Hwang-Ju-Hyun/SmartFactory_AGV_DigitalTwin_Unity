@@ -15,7 +15,16 @@ public class AGV : Object
     }
     public override void Read(InputMemoryStream _inStream)
     {
-        m_PosX = _inStream.ReadInt32();
-        m_PosY = _inStream.ReadInt32();
+        m_PosX = _inStream.ReadFloat();
+        m_PosY = _inStream.ReadFloat();
+
+        float qx = _inStream.ReadFloat();
+        float qy = _inStream.ReadFloat();
+        float qz= _inStream.ReadFloat();
+        float qw= _inStream.ReadFloat();
+
+        Quaternion quaternion = new Quaternion(qx, qy, qz, qw);
+
+        m_Rot= quaternion;
     }
 }

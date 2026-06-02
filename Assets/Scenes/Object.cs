@@ -3,8 +3,10 @@ using UnityEngine;
 
 public abstract class Object : MonoBehaviour
 {
-    public int m_PosX { get; set; }
-    public int m_PosY { get; set; }
+    public float m_PosX { get; set; }
+    public float m_PosY { get; set; }
+
+    public Quaternion m_Rot { get; set; } 
 
     Vector2 m_Position { get; set; }
 
