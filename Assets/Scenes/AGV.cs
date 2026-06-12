@@ -7,6 +7,7 @@ public class AGV : Object
     private void Awake()
     {
         m_ClassID = (UInt32)CLASS_ID.OBJ_AGV;
+
     }
     public override UInt32 GetClassID() { return m_ClassID; }
     public static AGV Create()
@@ -27,4 +28,13 @@ public class AGV : Object
 
         m_Rot= quaternion;
     }
+    private void OnCollisionEnter(Collision collision)
+    {
+        if (collision.collider.CompareTag("AGV"))
+        {
+            Debug.Log("OnCollisionEnter " + collision.gameObject.name);
+        }
+        
+    }
+
 }

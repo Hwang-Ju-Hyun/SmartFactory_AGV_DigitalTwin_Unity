@@ -55,6 +55,7 @@ public class TCPSession
                 catch (Exception e)
                 {
                     Debug.Log(e);
+                    break;
                 }
             }
         }

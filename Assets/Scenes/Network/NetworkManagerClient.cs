@@ -7,7 +7,9 @@ public enum PACKET_TYPE : byte
 {    
     PT_REPLICATION = 0,
     PT_MAZE_DATA=1,
-    PT_HELLO = 2
+    PT_HELLO = 2,
+    PT_READY_MAP = 4,
+    PT_READY_OBJECT = 5,
 }
 
 public enum REPLICATION_ACTION:byte
@@ -35,6 +37,11 @@ public class NetworkManagerClient : MonoBehaviour
     private Queue<INetworkEvent> m_NetworkEventQueue = new Queue<INetworkEvent>();
     private readonly object m_Lock = new object();
 
+
+    private int m_SpawnedObjectCount = 0;        
+    private const int TARGET_SPAWN_COUNT = 15;
+
+
     public static NetworkManagerClient Instance { get; private set; }    
     private void Awake()
     {
@@ -49,9 +56,7 @@ public class NetworkManagerClient : MonoBehaviour
         m_Session= ConnectTOServer();
         OutputMemoryStream outStream = new OutputMemoryStream();
         
-        WriteHelloPacket(outStream);
-
-        m_Session.SendPacket(outStream);
+        WriteNSendHelloPacket(outStream);        
 
         m_ReceiveThread = new Thread(m_Session.ProcessIncomingData);
         m_ReceiveThread.Start();
@@ -72,7 +77,7 @@ public class NetworkManagerClient : MonoBehaviour
     public TCPSession ConnectTOServer()
     {
         m_Client = new TcpClient();
-        m_Client.Connect("127.0.0.1", 9999);
+        m_Client.Connect("127.0.0.1", 6666);
 
         TCPSession serverSession = new TCPSession(m_Client);
         serverSession.onPacketReceived = (inStream) => { this.ProcessPacket(inStream); };
@@ -116,8 +121,7 @@ public class NetworkManagerClient : MonoBehaviour
         {
             NetworkMapBuildEvent nbe = new NetworkMapBuildEvent(Map.Instance.m_Nodes, Map.Instance.m_Links);
             m_NetworkEventQueue.Enqueue(nbe);
-        }
-        
+        }        
     }
 
     public void HandleHelloPacket_Recv(InputMemoryStream _inStream)
@@ -125,7 +129,7 @@ public class NetworkManagerClient : MonoBehaviour
         Debug.Log($"<color=cyan> Hello packet</color>을 서버에게서 받았습니다!");        
         UInt32 sessionID = _inStream.ReadUInt32();        
         Debug.Log($"<color=green>Session ID :</color>" + sessionID);        
-    }
+    }    
 
     public void HandleReplicatePacket_Recv(InputMemoryStream _inStream)
     {
@@ -149,7 +153,8 @@ public class NetworkManagerClient : MonoBehaviour
                         {                            
                             NetworkSpawnEvent nse = new NetworkSpawnEvent(networkID, classID);
                             m_NetworkEventQueue.Enqueue(nse);
-                        }                                                
+                        }
+
                         break;
                     }
                 case REPLICATION_ACTION.RT_UPDATE:
@@ -165,17 +170,41 @@ public class NetworkManagerClient : MonoBehaviour
                         {
                             NetworkUpdateEvent nue = new NetworkUpdateEvent(networkID, pos, rot);
                             m_NetworkEventQueue.Enqueue(nue);
-                        }                        
+                        }
 
                         break;
                     }
             }
         }
     }
-    public void WriteHelloPacket(OutputMemoryStream _inStream)
+
+    public void CheckAndSendReadyObject()
     {
-        short packet_type = (short)PACKET_TYPE.PT_HELLO;
-        _inStream.WriteShort(packet_type);        
+        m_SpawnedObjectCount++;
+
+        if (m_SpawnedObjectCount >= TARGET_SPAWN_COUNT)
+        {
+            OutputMemoryStream outStream = new OutputMemoryStream();
+            WriteNSendReadyObjectPacket(outStream);            
+        }
     }
 
+    public void WriteNSendHelloPacket(OutputMemoryStream _inStream)
+    {
+        byte packet_type = (byte)PACKET_TYPE.PT_HELLO;
+        _inStream.WriteByte(packet_type);
+        m_Session.SendPacket(_inStream);
+    }
+    public void WriteNSendReadyMapPacket(OutputMemoryStream _inStream)
+    {
+        byte packet_type = (byte)PACKET_TYPE.PT_READY_MAP;
+        _inStream.WriteByte(packet_type);
+        m_Session.SendPacket(_inStream);
+    }
+    public void WriteNSendReadyObjectPacket(OutputMemoryStream _inStream)
+    {
+        byte packet_type = (byte)PACKET_TYPE.PT_READY_OBJECT;
+        _inStream.WriteByte(packet_type);
+        m_Session.SendPacket(_inStream);
+    }
 }

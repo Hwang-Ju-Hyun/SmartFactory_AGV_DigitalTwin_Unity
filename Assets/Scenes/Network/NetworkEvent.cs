@@ -9,10 +9,10 @@ public interface INetworkEvent
 }
 
 public class NetworkMapBuildEvent:INetworkEvent
-{
-    private List<Node> m_Nodes;
+{    
+    private Dictionary<UInt32,Node> m_Nodes;
     private List<Link> m_Links;
-    public NetworkMapBuildEvent(List<Node> nodes, List<Link> links)
+    public NetworkMapBuildEvent(Dictionary<UInt32, Node> nodes, List<Link> links)
     {
         m_Nodes = nodes;
         m_Links = links;
@@ -20,6 +20,8 @@ public class NetworkMapBuildEvent:INetworkEvent
     public void Excute()
     {
         RenderManager.Instance.MapBuild(m_Nodes, m_Links);
+        OutputMemoryStream outStream = new OutputMemoryStream();
+        NetworkManagerClient.Instance.WriteNSendReadyMapPacket(outStream);   
     }
 }
 
@@ -33,8 +35,11 @@ public class NetworkSpawnEvent:INetworkEvent
     }
 
     public void Excute() 
-    {
+    {                   
         RenderManager.Instance.OnNetworkObjectCreated(m_networkID, m_classID);
+        OutputMemoryStream outStream =new OutputMemoryStream();
+        NetworkManagerClient.Instance.CheckAndSendReadyObject();
+        
     }
 }
 
@@ -50,6 +55,7 @@ public class NetworkUpdateEvent : INetworkEvent
         m_position = _position;
         m_quat = _quat;
     }
+
     public void Excute()
     {
         RenderManager.Instance.UpdateObjectPosition(m_networkID, m_position,m_quat);

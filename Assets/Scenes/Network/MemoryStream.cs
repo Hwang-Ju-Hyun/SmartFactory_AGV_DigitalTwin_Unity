@@ -131,10 +131,12 @@ public class InputMemoryStream
         return val;
     }
 
-    public List<Node> ReadNodes()
+    public Dictionary<UInt32,Node> ReadNodes()
     {
-        List<Node> nodes=new List<Node>();
+        Dictionary<UInt32, Node> nodes =new Dictionary<UInt32, Node>();
+        
         UInt32 length = ReadUInt32();        
+
         for(int i=0;i<length;i++)
         {
             UInt32 id = ReadUInt32();
@@ -148,7 +150,7 @@ public class InputMemoryStream
             node.m_PosY = PosY;
             node.type = type;
 
-            nodes.Add(node);
+            nodes.Add(id, node);
         }
         
         return nodes;

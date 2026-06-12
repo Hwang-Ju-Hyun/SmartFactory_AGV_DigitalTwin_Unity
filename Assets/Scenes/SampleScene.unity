@@ -206,7 +206,7 @@ Transform:
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 0, y: 16.46, z: 0.04}
+  m_LocalPosition: {x: 1.59, y: 52.2, z: -4.99}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -466,6 +466,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::RenderManager
   agvPrefab: {fileID: 9092275558553888916, guid: 9178ab6116a0d0b40aaaa056f5e682b2, type: 3}
   defaultPrefab: {fileID: 1128315000588015130, guid: e64f87ad20e88624da4c32548aea00a9, type: 3}
+  nodePrefab: {fileID: 0}
+  linkPrefab: {fileID: 0}
 --- !u!65 &1151076561
 BoxCollider:
   m_ObjectHideFlags: 0

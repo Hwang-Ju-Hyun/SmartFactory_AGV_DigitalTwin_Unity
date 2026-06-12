@@ -28,14 +28,14 @@ public class Map : MonoBehaviour
         }
     }
 
-    public List<Node> m_Nodes { get; set; }
+    public Dictionary<UInt32,Node> m_Nodes { get; set; }
     public List<Link> m_Links {  get; set; }
+    
     void Start()
     {
         
     }
-
-    // Update is called once per frame
+    
     void Update()
     {
         

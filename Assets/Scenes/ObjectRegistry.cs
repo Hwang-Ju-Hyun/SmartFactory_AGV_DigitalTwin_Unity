@@ -29,7 +29,7 @@ public class ObjectRegistry
     {        
         if (!m_NameToObjectCreationFuncMap.ContainsKey(_objClassName))
         {
-            Debug.LogError($"[ObjectRegistry] 등록되지 않은 ClassID({_objClassName})를 생성하려고 합니다!");
+            Debug.LogError($"[ObjectRegistry] 등록되지 않은 ClassID({_objClassName})를 생성하려고 합니다.");
             return null;
         }
         Func<Object> createFunc = m_NameToObjectCreationFuncMap[_objClassName];
