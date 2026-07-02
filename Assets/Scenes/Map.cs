@@ -14,7 +14,12 @@ public class Link
 {
     public UInt32 m_Id;
     public UInt32 m_FromNodeID;
-    public UInt32 m_ToNodeID;    
+    public UInt32 m_ToNodeID;
+    public byte m_Type;
+    public float m_CX1;
+    public float m_CZ1; 
+    public float m_CX2;
+    public float m_CZ2; 
 };
 
 public class Map : MonoBehaviour

@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System;
+
 public class RenderManager:MonoBehaviour
 {
     private Dictionary<UInt32, GameObject> m_NetworkIDToGameObjectMap;
@@ -51,66 +52,7 @@ public class RenderManager:MonoBehaviour
         m_NetworkIDToGameObjectMap.Add(_networkID, Representaion_3D);
 
         Material m = Representaion_3D.GetComponent<MeshRenderer>().material;
-        if (_networkID == 15)
-        {
-            m.color = Color.oldLace;
-        }
-        if (_networkID == 14)
-        {
-            m.color = Color.lightSalmon;
-        }
-        if (_networkID == 13)
-        {
-            m.color = Color.darkGoldenRod;
-        }
-        if (_networkID == 12)
-        {
-            m.color = Color.indigo;
-        }
-        if (_networkID == 11)
-        {
-            m.color = Color.violet;
-        }
-        if (_networkID == 10)
-        {
-            m.color = Color.plum;
-        }
-        if (_networkID == 9)
-        {
-            m.color = Color.chartreuse;
-        }
-        if (_networkID == 8)
-        {
-            m.color = Color.maroon;
-        }
-        if (_networkID == 7)
-        {
-            m.color = Color.ghostWhite;
-        }
-        if (_networkID == 6)
-        {
-            m.color = Color.coral;
-        }
-        if (_networkID == 5)
-        {
-            m.color = Color.darkTurquoise;
-        }
-        if (_networkID == 4)
-        {
-            m.color = Color.purple;
-        }
-        if (_networkID == 3)
-        {
-            m.color = Color.red;
-        }
-        if (_networkID == 2)
-        {
-            m.color = Color.green;            
-        }
-        if (_networkID == 1)
-        {
-            m.color = Color.black;
-        }
+        m.color = GetColorByID(_networkID);
     }
     public void UpdateObjectPosition(UInt32 _networkID, Vector2 _position,Quaternion _rot)
     { 
@@ -128,84 +70,87 @@ public class RenderManager:MonoBehaviour
             Vector3 nodePos = new Vector3(node.m_PosX, 0.05f, node.m_PosY);
             GameObject nodeObj = Instantiate(nodePrefab, nodePos, Quaternion.identity);
             nodeObj.name = $"Node_[{node.m_Id}]_Type_{node.type}";
-            Material m = nodeObj.GetComponent<MeshRenderer>().material;
-            if (node.m_Id == 11|| node.m_Id == 7)
+            MapNode mapNode = nodeObj.GetComponent<MapNode>();
+            if (mapNode != null)
             {
-                m.color = Color.black;
+                mapNode.nodeID = (int)node.m_Id; 
             }
-            if (node.m_Id == 15 || node.m_Id == 16)
-            {
-                m.color = Color.maroon;
-            }
-            if (node.m_Id == 5 || node.m_Id == 1)
-            {
-                m.color = Color.green;
-            }
-            if (node.m_Id == 2 || node.m_Id == 49)
-            {
-                m.color = Color.red;
-            }
-            if (node.m_Id == 9 || node.m_Id == 10)
-            {
-                m.color = Color.purple;
-            }
-            if (node.m_Id == 21 || node.m_Id == 4)
-            {
-                m.color = Color.darkTurquoise;
-            }
-            if (node.m_Id == 6 || node.m_Id == 23)
-            {
-                m.color = Color.coral;
-            }
-            if (node.m_Id == 12 || node.m_Id == 24)
-            {
-                m.color = Color.ghostWhite;
-            }            
-            if (node.m_Id == 43 || node.m_Id == 17)
-            {
-                m.color = Color.chartreuse;
-            }
-            if (node.m_Id == 47 || node.m_Id == 45)
-            {
-                m.color = Color.plum;
-            }
-            if (node.m_Id == 22 || node.m_Id == 42)
-            {
-                m.color = Color.violet;
-            }
-            if (node.m_Id == 46 || node.m_Id == 43)
-            {
-                m.color = Color.indigo;
-            }
-            if (node.m_Id == 50 || node.m_Id == 41)
-            {
-                m.color = Color.darkGoldenRod;
-            }
-            if (node.m_Id == 13 || node.m_Id == 39)
-            {
-                m.color = Color.lightSalmon;
-            }
-            if (node.m_Id == 48 || node.m_Id == 44)
-            {
-                m.color = Color.oldLace;
-            }
-        }        
+            Material m = nodeObj.GetComponent<MeshRenderer>().material;           
+        }
 
+        // 2. 링크 생성 (직선과 곡선 분기 처리 완벽 적용!)
         foreach (Link link in _links)
         {
             Node fromNode = _nodes[link.m_FromNodeID];
-            Node toNode = _nodes[link.m_ToNodeID];            
-            
-            Vector3 startPos= new Vector3(fromNode.m_PosX,0.05f,fromNode.m_PosY);
+            Node toNode = _nodes[link.m_ToNodeID];
+
+            // Y축을 0.05f로 띄워서 바닥에 파묻히지 않게 함
+            Vector3 startPos = new Vector3(fromNode.m_PosX, 0.05f, fromNode.m_PosY);
             Vector3 endPos = new Vector3(toNode.m_PosX, 0.05f, toNode.m_PosY);
 
-            GameObject linkObj = Instantiate(linkPrefab, startPos, Quaternion.identity);            
+            GameObject linkObj = Instantiate(linkPrefab, startPos, Quaternion.identity);
+            LineRenderer lr = linkObj.GetComponent<LineRenderer>();
 
-            LineRenderer lr =linkObj.GetComponent<LineRenderer>();
+            //월드 좌표계 사용 강제 설정 (곡선 그리기 훨씬 편해집니다)
+            lr.useWorldSpace = true;
 
-            //LineRenderer는 현재 로컬좌표기준 
-            lr.SetPosition(0, Vector3.zero);
-            lr.SetPosition(1, linkObj.transform.InverseTransformPoint(endPos));
-        }       
+            //곡선일 때와 직선일 때를 나눠서 선을 그립니다.
+            if (link.m_Type == 1)
+            {
+                int resolution = 20; // 선을 20조각으로 쪼개서 부드럽게 만듦
+                lr.positionCount = resolution + 1;
+
+                // C++ 서버에서 받은 제어점 데이터 
+                // (주의: 서버의 Z값이 유니티 2D 탑뷰상 Y로 들어오고 있다면 m_CZ1을 Y자리에 넣으세요)
+                Vector3 p0 = startPos;
+                Vector3 p1 = new Vector3(link.m_CX1, 0.05f, link.m_CZ1);
+                Vector3 p2 = new Vector3(link.m_CX2, 0.05f, link.m_CZ2);
+                Vector3 p3 = endPos;
+
+                Debug.DrawLine(p0, p1, Color.red, 10f);  // 출발점 -> 제어점1 (빨간선)
+                Debug.DrawLine(p3, p2, Color.blue, 10f); // 도착점 -> 제어점2 (파란선)
+
+                for (int i = 0; i <= resolution; i++)
+                {
+                    float t = i / (float)resolution;
+                    float u = 1.0f - t;
+
+                    float tt = t * t;
+                    float uu = u * u;
+                    float uuu = uu * u;
+                    float ttt = tt * t;
+
+                    // 3차 베지어 위치 계산 (C++ 서버와 100% 동일한 공식)
+                    Vector3 pos = (uuu * p0) +
+                                  (3f * uu * t * p1) +
+                                  (3f * u * tt * p2) +
+                                  (ttt * p3);
+
+                    lr.SetPosition(i, pos);
+                }
+            }
+            else // 직선 모드
+            {
+                lr.positionCount = 2;
+                lr.SetPosition(0, startPos);
+                lr.SetPosition(1, endPos);
+            }
+        }
+    }
+    public Color GetColorByID(UInt32 networkID)
+    {
+        UnityEngine.Random.State oldState = UnityEngine.Random.state;
+
+        // 2. 네트워크 ID를 시드 값으로 설정합니다. 
+        // (이렇게 하면 이 ID는 항상 같은 난수 패턴을 가집니다)
+        UnityEngine.Random.InitState((int)networkID);
+
+        Color randomColor = UnityEngine.Random.ColorHSV(0f, 1f, 0.8f, 1f, 0.8f, 1f);
+
+        UnityEngine.Random.state = oldState;
+
+        return randomColor;
     }
 }
+
+

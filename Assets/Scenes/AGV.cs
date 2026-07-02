@@ -26,11 +26,11 @@ public class AGV : Object
 
         Quaternion quaternion = new Quaternion(qx, qy, qz, qw);
 
-        m_Rot= quaternion;
+        //m_Rot= quaternion;
     }
     private void OnCollisionEnter(Collision collision)
     {
-        if (collision.collider.CompareTag("AGV"))
+        if (collision.gameObject.GetComponentInChildren<Object>().GetClassID() == (UInt32)CLASS_ID.OBJ_AGV)
         {
             Debug.Log("OnCollisionEnter " + collision.gameObject.name);
         }

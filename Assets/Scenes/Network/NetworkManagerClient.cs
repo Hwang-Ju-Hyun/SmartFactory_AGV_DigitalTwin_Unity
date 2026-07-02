@@ -38,9 +38,8 @@ public class NetworkManagerClient : MonoBehaviour
     private readonly object m_Lock = new object();
 
 
-    private int m_SpawnedObjectCount = 0;        
-    private const int TARGET_SPAWN_COUNT = 15;
-
+    private int m_SpawnedObjectCount     = 0;
+    private const int TARGET_SPAWN_COUNT = 2;
 
     public static NetworkManagerClient Instance { get; private set; }    
     private void Awake()

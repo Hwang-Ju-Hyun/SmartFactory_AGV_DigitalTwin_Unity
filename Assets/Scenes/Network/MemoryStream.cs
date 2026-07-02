@@ -164,12 +164,25 @@ public class InputMemoryStream
         {
             UInt32 id = ReadUInt32();
             UInt32 FromNodeID = ReadUInt32();
-            UInt32 ToNodeID = ReadUInt32();            
+            UInt32 ToNodeID = ReadUInt32();
+
+            byte type = ReadByte();
+
+            float cx1 = ReadFloat();
+            float cz1 = ReadFloat();
+            float cx2 = ReadFloat();
+            float cz2 = ReadFloat();
 
             Link link = new Link();
             link.m_Id = id;
-            link.m_FromNodeID  = FromNodeID;
-            link.m_ToNodeID= ToNodeID;
+            link.m_FromNodeID = FromNodeID;
+            link.m_ToNodeID = ToNodeID;
+
+            link.m_Type = type; //바이트 그대로 대입
+            link.m_CX1 = cx1;
+            link.m_CZ1 = cz1;
+            link.m_CX2 = cx2;
+            link.m_CZ2 = cz2;
 
             links.Add(link);
         }
