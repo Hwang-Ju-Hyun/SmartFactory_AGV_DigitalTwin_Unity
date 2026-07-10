@@ -103,6 +103,12 @@ public class InputMemoryStream
         m_Head += 1;
         return val;
     }
+    public short ReadShort()
+    {
+        short val = BitConverter.ToInt16(m_Buffer, m_Head);
+        m_Head += 2;
+        return val;
+    }
     public uint ReadUInt32()
     {        
         UInt32 val = BitConverter.ToUInt32(m_Buffer, m_Head);     

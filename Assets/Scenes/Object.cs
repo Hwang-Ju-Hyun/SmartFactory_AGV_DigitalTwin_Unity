@@ -7,6 +7,7 @@ public abstract class Object : MonoBehaviour
     public float m_PosY { get; set; }
 
     public Quaternion m_Rot { get; set; } 
+    public float m_HeadingAngle {  get; set; }
 
     Vector2 m_Position { get; set; }
 

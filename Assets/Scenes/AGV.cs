@@ -19,14 +19,16 @@ public class AGV : Object
         m_PosX = _inStream.ReadFloat();
         m_PosY = _inStream.ReadFloat();
 
-        float qx = _inStream.ReadFloat();
-        float qy = _inStream.ReadFloat();
-        float qz= _inStream.ReadFloat();
-        float qw= _inStream.ReadFloat();
+        //float qx = _inStream.ReadFloat();
+        //float qy = _inStream.ReadFloat();
+        //float qz= _inStream.ReadFloat();
+        //float qw= _inStream.ReadFloat();
 
-        Quaternion quaternion = new Quaternion(qx, qy, qz, qw);
-
+        //Quaternion quaternion = new Quaternion(qx, qy, qz, qw);
         //m_Rot= quaternion;
+
+        m_HeadingAngle= _inStream.ReadFloat();
+
     }
     private void OnCollisionEnter(Collision collision)
     {

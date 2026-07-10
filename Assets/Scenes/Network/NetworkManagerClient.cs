@@ -10,6 +10,15 @@ public enum PACKET_TYPE : byte
     PT_HELLO = 2,
     PT_READY_MAP = 4,
     PT_READY_OBJECT = 5,
+
+
+
+    PT_ROUTE = 10,          // (서버->로봇) "이 노드들을 순서대로 거쳐서 가라"
+    PT_CANCEL_ROUTE = 11,   // (서버->로봇) "경로 폐기! 그 자리에 정지해라"
+    PT_ARRIVED = 12,        // (로봇->서버) "다음 노드에 무사히 도착했습니다"
+    PT_STATUS = 13,         // (로봇->서버) "현재 X, Z, 각도, 속도, 배터리 상태 보고"
+    PT_ERROR = 14,          // (로봇->서버) "모터 고장 / 충돌 감지"
+    PT_HEARTBEAT = 15       // (로봇->서버) "나 아직 살아있음 (1초 주기)"     
 }
 
 public enum REPLICATION_ACTION:byte
@@ -39,7 +48,7 @@ public class NetworkManagerClient : MonoBehaviour
 
 
     private int m_SpawnedObjectCount     = 0;
-    private const int TARGET_SPAWN_COUNT = 2;
+    private const int TARGET_SPAWN_COUNT = 22;
 
     public static NetworkManagerClient Instance { get; private set; }    
     private void Awake()
@@ -108,9 +117,14 @@ public class NetworkManagerClient : MonoBehaviour
                     HandleReplicatePacket_Recv(_inStream);
                     break;
                 }
+            case PACKET_TYPE.PT_ROUTE:
+                {
+                    
+                    break;
+                }
         }
     }
-
+ 
     public void HandleMapDataPacket_Recv(InputMemoryStream _inStream)
     {
         Map.Instance.m_Nodes=_inStream.ReadNodes();
@@ -157,17 +171,18 @@ public class NetworkManagerClient : MonoBehaviour
                         break;
                     }
                 case REPLICATION_ACTION.RT_UPDATE:
-                    {                        
+                    {                         
                         Object obj = m_LinkingContext.GetObject(networkID);
                         obj.Read(_inStream);
                         
 
                         Vector2 pos = new Vector2(obj.m_PosX, obj.m_PosY);
-                        Quaternion rot = obj.m_Rot;
+                        //Quaternion rot = obj.m_Rot;
+                        float headingAngle = obj.m_HeadingAngle;
 
                         lock (m_Lock)
                         {
-                            NetworkUpdateEvent nue = new NetworkUpdateEvent(networkID, pos, rot);
+                            NetworkUpdateEvent nue = new NetworkUpdateEvent(networkID, pos, headingAngle);
                             m_NetworkEventQueue.Enqueue(nue);
                         }
 

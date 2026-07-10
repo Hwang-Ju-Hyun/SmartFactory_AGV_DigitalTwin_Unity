@@ -62,6 +62,17 @@ public class RenderManager:MonoBehaviour
             m_NetworkIDToGameObjectMap[_networkID].transform.rotation = _rot;
         }
     }
+    public void UpdateObjectPosition(UInt32 _networkID, Vector2 _position, float _rot)
+    {
+        if (m_NetworkIDToGameObjectMap.ContainsKey(_networkID))
+        {
+            m_NetworkIDToGameObjectMap[_networkID].transform.position = new Vector3(_position.x, 0.0f, _position.y);
+            float angleDeg = _rot * Mathf.Rad2Deg;
+            angleDeg = -(angleDeg) + 90f;
+            Quaternion targetRot = Quaternion.Euler(0f, angleDeg, 0f);
+            m_NetworkIDToGameObjectMap[_networkID].transform.rotation = targetRot;
+        }
+    }
 
     public void MapBuild(Dictionary<UInt32, Node> _nodes,List<Link> _links)
     {        

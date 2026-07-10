@@ -48,16 +48,23 @@ public class NetworkUpdateEvent : INetworkEvent
 {
     private UInt32 m_networkID;
     private Vector2 m_position;
-    private Quaternion m_quat;
+    Quaternion m_rotation;
+    private float m_headingAngle;
     public NetworkUpdateEvent(UInt32 _networkID, Vector2 _position, Quaternion _quat)
     {
         m_networkID = _networkID;
         m_position = _position;
-        m_quat = _quat;
+        m_rotation = _quat;
+    }
+    public NetworkUpdateEvent(UInt32 _networkID, Vector2 _position, float _headingAngle)
+    {
+        m_networkID = _networkID;
+        m_position = _position;
+        m_headingAngle= _headingAngle;
     }
 
     public void Excute()
     {
-        RenderManager.Instance.UpdateObjectPosition(m_networkID, m_position,m_quat);
+        RenderManager.Instance.UpdateObjectPosition(m_networkID, m_position, m_headingAngle);
     }
 }
