@@ -20,8 +20,6 @@ public class NetworkMapBuildEvent:INetworkEvent
     public void Excute()
     {
         RenderManager.Instance.MapBuild(m_Nodes, m_Links);
-        OutputMemoryStream outStream = new OutputMemoryStream();
-        NetworkManagerClient.Instance.WriteNSendReadyMapPacket(outStream);   
     }
 }
 
@@ -37,8 +35,6 @@ public class NetworkSpawnEvent:INetworkEvent
     public void Excute() 
     {                   
         RenderManager.Instance.OnNetworkObjectCreated(m_networkID, m_classID);
-        OutputMemoryStream outStream =new OutputMemoryStream();
-        NetworkManagerClient.Instance.CheckAndSendReadyObject();
         
     }
 }

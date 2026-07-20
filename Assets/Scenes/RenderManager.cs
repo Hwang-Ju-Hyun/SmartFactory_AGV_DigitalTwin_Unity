@@ -10,8 +10,7 @@ public class RenderManager:MonoBehaviour
     public GameObject agvPrefab;
     public GameObject defaultPrefab;
     public GameObject nodePrefab;
-    public GameObject linkPrefab;
-
+    public GameObject linkPrefab;    
     public void Awake()
     {
         if (Instance == null)

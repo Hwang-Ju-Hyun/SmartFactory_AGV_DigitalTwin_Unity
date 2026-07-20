@@ -3,33 +3,32 @@ using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Threading;
 using UnityEngine;
+
 public enum PACKET_TYPE : byte
-{    
+{
     PT_REPLICATION = 0,
-    PT_MAZE_DATA=1,
+    PT_MAZE_DATA = 1,
     PT_HELLO = 2,
     PT_READY_MAP = 4,
     PT_READY_OBJECT = 5,
 
-
-
-    PT_ROUTE = 10,          // (º≠πˆ->∑Œ∫ø) "¿Ã ≥ÎµÂµÈ¿ª º¯º≠¥Î∑Œ ∞≈√ƒº≠ ∞°∂Û"
-    PT_CANCEL_ROUTE = 11,   // (º≠πˆ->∑Œ∫ø) "∞Ê∑Œ ∆Û±‚! ±◊ ¿⁄∏Æø° ¡§¡ˆ«ÿ∂Û"
-    PT_ARRIVED = 12,        // (∑Œ∫ø->º≠πˆ) "¥Ÿ¿Ω ≥ÎµÂø° π´ªÁ»˜ µµ¬¯«ﬂΩ¿¥œ¥Ÿ"
-    PT_STATUS = 13,         // (∑Œ∫ø->º≠πˆ) "«ˆ¿Á X, Z, ∞¢µµ, º”µµ, πË≈Õ∏Æ ªÛ≈¬ ∫∏∞Ì"
-    PT_ERROR = 14,          // (∑Œ∫ø->º≠πˆ) "∏≈Õ ∞Ì¿Â / √Êµπ ∞®¡ˆ"
-    PT_HEARTBEAT = 15       // (∑Œ∫ø->º≠πˆ) "≥™ æ∆¡˜ ªÏæ∆¿÷¿Ω (1√  ¡÷±‚)"     
+    PT_ROUTE = 10,
+    PT_CANCEL_ROUTE = 11,
+    PT_ARRIVED = 12,
+    PT_STATUS = 13,
+    PT_ERROR = 14,
+    PT_HEARTBEAT = 15
 }
 
-public enum REPLICATION_ACTION:byte
+public enum REPLICATION_ACTION : byte
 {
-    RT_CREATE=0,
-    RT_UPDATE=1,
-    RT_DESTORY=2,
+    RT_CREATE = 0,
+    RT_UPDATE = 1,
+    RT_DESTORY = 2,
     MAX
 }
 
-public enum CLASS_ID:UInt32
+public enum CLASS_ID : UInt32
 {
     OBJ_DEFAULT = 1000,
     OBJ_AGV = 1001
@@ -40,17 +39,16 @@ public class NetworkManagerClient : MonoBehaviour
     private TCPSession m_Session;
     private Thread m_ReceiveThread = null;
 
-
     private TcpClient m_Client;
     public LinkingContext m_LinkingContext { get; set; }
     private Queue<INetworkEvent> m_NetworkEventQueue = new Queue<INetworkEvent>();
     private readonly object m_Lock = new object();
 
-
-    private int m_SpawnedObjectCount     = 0;
+    private int m_SpawnedObjectCount = 0;
     private const int TARGET_SPAWN_COUNT = 4;
 
-    public static NetworkManagerClient Instance { get; private set; }    
+    public static NetworkManagerClient Instance { get; private set; }
+
     private void Awake()
     {
         if (Instance == null)
@@ -61,27 +59,27 @@ public class NetworkManagerClient : MonoBehaviour
 
     private void Start()
     {
-        m_Session= ConnectTOServer();
+        m_Session = ConnectTOServer();
         OutputMemoryStream outStream = new OutputMemoryStream();
-        
-        WriteNSendHelloPacket(outStream);        
+
+        WriteNSendHelloPacket(outStream);
 
         m_ReceiveThread = new Thread(m_Session.ProcessIncomingData);
         m_ReceiveThread.Start();
     }
 
-
     private void Update()
-    {        
-        lock(m_Lock)
+    {
+        lock (m_Lock)
         {
             while (m_NetworkEventQueue.Count > 0)
             {
                 INetworkEvent eve = m_NetworkEventQueue.Dequeue();
                 eve.Excute();
             }
-        }        
+        }
     }
+
     public TCPSession ConnectTOServer()
     {
         m_Client = new TcpClient();
@@ -97,6 +95,7 @@ public class NetworkManagerClient : MonoBehaviour
 
         return serverSession;
     }
+
     public void ProcessPacket(InputMemoryStream _inStream)
     {
         PACKET_TYPE packet_type = (PACKET_TYPE)_inStream.ReadByte();
@@ -119,51 +118,50 @@ public class NetworkManagerClient : MonoBehaviour
                 }
             case PACKET_TYPE.PT_ROUTE:
                 {
-                    
                     break;
                 }
         }
     }
- 
+
     public void HandleMapDataPacket_Recv(InputMemoryStream _inStream)
     {
-        Map.Instance.m_Nodes=_inStream.ReadNodes();
-        Map.Instance.m_Links=_inStream.ReadLinks();
-        
+        Map.Instance.m_Nodes = _inStream.ReadNodes();
+        Map.Instance.m_Links = _inStream.ReadLinks();
+
         lock (m_Lock)
         {
             NetworkMapBuildEvent nbe = new NetworkMapBuildEvent(Map.Instance.m_Nodes, Map.Instance.m_Links);
             m_NetworkEventQueue.Enqueue(nbe);
-        }        
+        }
     }
 
     public void HandleHelloPacket_Recv(InputMemoryStream _inStream)
     {
-        Debug.Log($"<color=cyan> Hello packet</color>¿ª º≠πˆø°∞‘º≠ πﬁæ“Ω¿¥œ¥Ÿ!");        
-        UInt32 sessionID = _inStream.ReadUInt32();        
-        Debug.Log($"<color=green>Session ID :</color>" + sessionID);        
-    }    
+        Debug.Log($"<color=cyan> Hello packet</color>ÏùÑ ÏÑúÎ≤ÑÏóêÍ≤åÏÑú Î∞õÏïòÏäµÎãàÎã§!");
+        UInt32 sessionID = _inStream.ReadUInt32();
+        Debug.Log($"<color=green>Session ID :</color>" + sessionID);
+    }
 
     public void HandleReplicatePacket_Recv(InputMemoryStream _inStream)
     {
         UInt32 commandCount = _inStream.ReadUInt32();
-        for(int i=0;i<commandCount;i++)
+        for (int i = 0; i < commandCount; i++)
         {
             UInt32 networkID = _inStream.ReadUInt32();
             REPLICATION_ACTION action = (REPLICATION_ACTION)_inStream.ReadByte();
-            switch(action)
+            switch (action)
             {
                 case REPLICATION_ACTION.RT_CREATE:
                     {
                         UInt32 classID = _inStream.ReadUInt32();
 
-                        Object obj = ObjectRegistry.Instance.CreateObject(classID);                        
+                        Object obj = ObjectRegistry.Instance.CreateObject(classID);
                         m_LinkingContext.AddObject(networkID, obj);
 
                         obj.Read(_inStream);
 
-                        lock(m_Lock)
-                        {                            
+                        lock (m_Lock)
+                        {
                             NetworkSpawnEvent nse = new NetworkSpawnEvent(networkID, classID);
                             m_NetworkEventQueue.Enqueue(nse);
                         }
@@ -171,13 +169,11 @@ public class NetworkManagerClient : MonoBehaviour
                         break;
                     }
                 case REPLICATION_ACTION.RT_UPDATE:
-                    {                         
+                    {
                         Object obj = m_LinkingContext.GetObject(networkID);
                         obj.Read(_inStream);
-                        
 
                         Vector2 pos = new Vector2(obj.m_PosX, obj.m_PosY);
-                        //Quaternion rot = obj.m_Rot;
                         float headingAngle = obj.m_HeadingAngle;
 
                         lock (m_Lock)
@@ -199,7 +195,7 @@ public class NetworkManagerClient : MonoBehaviour
         if (m_SpawnedObjectCount >= TARGET_SPAWN_COUNT)
         {
             OutputMemoryStream outStream = new OutputMemoryStream();
-            WriteNSendReadyObjectPacket(outStream);            
+            WriteNSendReadyObjectPacket(outStream);
         }
     }
 
@@ -209,12 +205,14 @@ public class NetworkManagerClient : MonoBehaviour
         _inStream.WriteByte(packet_type);
         m_Session.SendPacket(_inStream);
     }
+
     public void WriteNSendReadyMapPacket(OutputMemoryStream _inStream)
     {
         byte packet_type = (byte)PACKET_TYPE.PT_READY_MAP;
         _inStream.WriteByte(packet_type);
         m_Session.SendPacket(_inStream);
     }
+
     public void WriteNSendReadyObjectPacket(OutputMemoryStream _inStream)
     {
         byte packet_type = (byte)PACKET_TYPE.PT_READY_OBJECT;
