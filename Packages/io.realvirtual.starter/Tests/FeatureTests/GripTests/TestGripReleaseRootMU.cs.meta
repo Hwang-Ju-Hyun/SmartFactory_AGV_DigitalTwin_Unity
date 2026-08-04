@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 90a66a30615e6434c9ef29dd56b934aa
+AssetOrigin:
+  serializedVersion: 1
+  productId: 366612
+  packageName: realvirtual Digital Twin Starter 6.3
+  packageVersion: 6.3.4-9151
+  assetPath: Packages/io.realvirtual.starter/Tests/FeatureTests/GripTests/TestGripReleaseRootMU.cs
+  uploadId: 935620
