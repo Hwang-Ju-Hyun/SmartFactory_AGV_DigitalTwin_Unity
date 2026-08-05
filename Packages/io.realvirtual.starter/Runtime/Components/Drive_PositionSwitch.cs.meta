@@ -1,9 +1,0 @@
-fileFormatVersion: 2
-guid: 878553a9e2d06af45903dec4eb476e6b
-AssetOrigin:
-  serializedVersion: 1
-  productId: 366612
-  packageName: realvirtual Digital Twin Starter 6.3
-  packageVersion: 6.3.4-9151
-  assetPath: Packages/io.realvirtual.starter/Runtime/Components/Drive_PositionSwitch.cs
-  uploadId: 935620
