@@ -1,39 +1,37 @@
-using UnityEngine;
 using System;
 using System.Collections.Generic;
 
-public class ObjectRegistry
+public sealed class ObjectRegistry
 {
+    private readonly Dictionary<UInt32, Func<NetworkObjectState>> m_CreationFunctions =
+        new Dictionary<UInt32, Func<NetworkObjectState>>();
+
     public static ObjectRegistry Instance { get; private set; }
 
     public static void StaticInit()
     {
         Instance = new ObjectRegistry();
     }
-    private Dictionary<UInt32, Func<Object>> m_NameToObjectCreationFuncMap;
-    private ObjectRegistry()
-    {
-        m_NameToObjectCreationFuncMap = new Dictionary<UInt32, Func<Object>>();
-    }
-    
-    public void RegistCreateFunction(UInt32 _objClassName, Func<Object> _createFunc)
-    {
-        if (m_NameToObjectCreationFuncMap.ContainsKey(_objClassName))
-        {
-            Debug.LogError($"[ObjectRegistry] 이미 등록된 ClassID 입니다: {_objClassName}");
-            return;
-        }
-        m_NameToObjectCreationFuncMap.Add(_objClassName, _createFunc);
-    }
-    public Object CreateObject(UInt32 _objClassName)
-    {        
-        if (!m_NameToObjectCreationFuncMap.ContainsKey(_objClassName))
-        {
-            Debug.LogError($"[ObjectRegistry] 등록되지 않은 ClassID({_objClassName})를 생성하려고 합니다.");
-            return null;
-        }
-        Func<Object> createFunc = m_NameToObjectCreationFuncMap[_objClassName];
 
-        return createFunc.Invoke();
+    public void RegisterCreateFunction(UInt32 classID, Func<NetworkObjectState> createFunction)
+    {
+        if (createFunction == null)
+        {
+            throw new ArgumentNullException(nameof(createFunction));
+        }
+
+        if (m_CreationFunctions.ContainsKey(classID))
+        {
+            throw new InvalidOperationException($"ClassID {classID} is already registered.");
+        }
+
+        m_CreationFunctions.Add(classID, createFunction);
+    }
+
+    public NetworkObjectState CreateObject(UInt32 classID)
+    {
+        return m_CreationFunctions.TryGetValue(classID, out Func<NetworkObjectState> createFunction)
+            ? createFunction()
+            : null;
     }
 }

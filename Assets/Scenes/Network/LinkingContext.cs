@@ -1,30 +1,30 @@
 using System;
 using System.Collections.Generic;
-using UnityEditor.PackageManager;
-using UnityEngine;
 
-public class LinkingContext
+public sealed class LinkingContext
 {
-    private Dictionary<UInt32, Object> m_NewtorkIDToObjectDictionaty;
-    public LinkingContext()
+    private readonly Dictionary<UInt32, NetworkObjectState> m_Objects =
+        new Dictionary<UInt32, NetworkObjectState>();
+
+    public NetworkObjectState GetObject(UInt32 networkID)
     {
-        m_NewtorkIDToObjectDictionaty= new Dictionary<UInt32, Object>();
+        m_Objects.TryGetValue(networkID, out NetworkObjectState state);
+        return state;
     }
-    public Object GetObject(UInt32 _networkID)
+
+    public bool AddObject(UInt32 networkID, NetworkObjectState state)
     {
-        if(!m_NewtorkIDToObjectDictionaty.ContainsKey(_networkID))
-        {            
-            return null;
-        }
-        return m_NewtorkIDToObjectDictionaty[_networkID];
-    }
-    public void AddObject(UInt32 _networkID,Object _obj)
-    {
-        if (m_NewtorkIDToObjectDictionaty.ContainsKey(_networkID))
+        if (state == null || m_Objects.ContainsKey(networkID))
         {
-            Debug.LogError($"[LinkingContext] 에 해당 ({_networkID})는 이미 존재합니다 삽입할 수 없습니다!");
-            return;
+            return false;
         }
-        m_NewtorkIDToObjectDictionaty.Add(_networkID, _obj);
+
+        m_Objects.Add(networkID, state);
+        return true;
+    }
+
+    public bool RemoveObject(UInt32 networkID)
+    {
+        return m_Objects.Remove(networkID);
     }
 }

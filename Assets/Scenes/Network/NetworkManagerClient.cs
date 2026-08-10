@@ -1,35 +1,36 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Sockets;
 using System.Threading;
 using UnityEngine;
+
 public enum PACKET_TYPE : byte
-{    
+{
     PT_REPLICATION = 0,
-    PT_MAZE_DATA=1,
+    PT_MAZE_DATA = 1,
     PT_HELLO = 2,
     PT_READY_MAP = 4,
     PT_READY_OBJECT = 5,
 
-
-
-    PT_ROUTE = 10,          // (서버->로봇) "이 노드들을 순서대로 거쳐서 가라"
-    PT_CANCEL_ROUTE = 11,   // (서버->로봇) "경로 폐기! 그 자리에 정지해라"
-    PT_ARRIVED = 12,        // (로봇->서버) "다음 노드에 무사히 도착했습니다"
-    PT_STATUS = 13,         // (로봇->서버) "현재 X, Z, 각도, 속도, 배터리 상태 보고"
-    PT_ERROR = 14,          // (로봇->서버) "모터 고장 / 충돌 감지"
-    PT_HEARTBEAT = 15       // (로봇->서버) "나 아직 살아있음 (1초 주기)"     
+    // Deprecated legacy robot IDs. The Unity viewer never uses RobotProtocol.
+    PT_ROUTE = 10,
+    PT_CANCEL_ROUTE = 11,
+    PT_ARRIVED = 12,
+    PT_STATUS = 13,
+    PT_ERROR = 14,
+    PT_HEARTBEAT = 15
 }
 
-public enum REPLICATION_ACTION:byte
+public enum REPLICATION_ACTION : byte
 {
-    RT_CREATE=0,
-    RT_UPDATE=1,
-    RT_DESTORY=2,
+    RT_CREATE = 0,
+    RT_UPDATE = 1,
+    RT_DESTORY = 2,
     MAX
 }
 
-public enum CLASS_ID:UInt32
+public enum CLASS_ID : UInt32
 {
     OBJ_DEFAULT = 1000,
     OBJ_AGV = 1001
@@ -37,188 +38,412 @@ public enum CLASS_ID:UInt32
 
 public class NetworkManagerClient : MonoBehaviour
 {
+    [Header("Legacy Viewer Server")]
+    [SerializeField] private string m_ServerAddress = "127.0.0.1";
+    [SerializeField, Range(1, 65535)] private int m_ServerPort = 6666;
+
+    private readonly Queue<INetworkEvent> m_NetworkEventQueue = new Queue<INetworkEvent>();
+    private readonly Dictionary<UInt32, NetworkUpdateEvent> m_LatestUpdateByNetworkID =
+        new Dictionary<UInt32, NetworkUpdateEvent>();
+    private readonly object m_EventQueueLock = new object();
+
     private TCPSession m_Session;
-    private Thread m_ReceiveThread = null;
-
-
+    private Thread m_ReceiveThread;
     private TcpClient m_Client;
-    public LinkingContext m_LinkingContext { get; set; }
-    private Queue<INetworkEvent> m_NetworkEventQueue = new Queue<INetworkEvent>();
-    private readonly object m_Lock = new object();
+    private volatile bool m_ShuttingDown;
+    private int m_ShutdownStarted;
+    private bool m_ReadyMapSent;
+    private bool m_ReadyObjectSent;
 
+    public static NetworkManagerClient Instance { get; private set; }
+    public LinkingContext LinkingContext { get; private set; }
 
-    private int m_SpawnedObjectCount     = 0;
-    private const int TARGET_SPAWN_COUNT = 4;
-
-    public static NetworkManagerClient Instance { get; private set; }    
     private void Awake()
     {
-        if (Instance == null)
+        if (Instance != null && Instance != this)
         {
-            Instance = this;
+            Destroy(gameObject);
+            return;
+        }
+
+        Instance = this;
+    }
+
+    private void OnValidate()
+    {
+        m_ServerPort = Mathf.Clamp(m_ServerPort, 1, 65535);
+        if (string.IsNullOrWhiteSpace(m_ServerAddress))
+        {
+            m_ServerAddress = "127.0.0.1";
         }
     }
 
     private void Start()
     {
-        m_Session= ConnectTOServer();
-        OutputMemoryStream outStream = new OutputMemoryStream();
-        
-        WriteNSendHelloPacket(outStream);        
+        try
+        {
+            m_Session = ConnectToServer();
+            m_ReceiveThread = new Thread(m_Session.ProcessIncomingData)
+            {
+                IsBackground = true,
+                Name = "Unity Legacy Viewer Receive"
+            };
+            m_ReceiveThread.Start();
 
-        m_ReceiveThread = new Thread(m_Session.ProcessIncomingData);
-        m_ReceiveThread.Start();
+            if (TrySendControlPacket(PACKET_TYPE.PT_HELLO, "HELLO"))
+            {
+                Debug.Log("[Viewer] HELLO sent using the legacy viewer protocol.");
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[Viewer] Connection failed: {exception.Message}");
+            ShutdownConnection(false);
+        }
     }
-
 
     private void Update()
-    {        
-        lock(m_Lock)
+    {
+        TakeNetworkEvents(
+            out INetworkEvent[] orderedEvents,
+            out NetworkUpdateEvent[] latestUpdateEvents);
+
+        foreach (INetworkEvent networkEvent in orderedEvents)
         {
-            while (m_NetworkEventQueue.Count > 0)
+            try
             {
-                INetworkEvent eve = m_NetworkEventQueue.Dequeue();
-                eve.Excute();
+                networkEvent.Execute();
             }
-        }        
+            catch (Exception exception)
+            {
+                Debug.LogError($"[Viewer] Main-thread network event failed: {exception.Message}");
+                ShutdownConnection(false);
+                break;
+            }
+        }
+
+        if (m_ShuttingDown)
+        {
+            return;
+        }
+
+        foreach (NetworkUpdateEvent updateEvent in latestUpdateEvents)
+        {
+            try
+            {
+                updateEvent.Execute();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"[Viewer] AGV position update failed: {exception.Message}");
+                ShutdownConnection(false);
+                break;
+            }
+        }
     }
-    public TCPSession ConnectTOServer()
+
+    public TCPSession ConnectToServer()
     {
-        m_Client = new TcpClient();
-        m_Client.Connect("127.0.0.1", 6666);
+        string serverAddress = m_ServerAddress.Trim();
+        m_Client = new TcpClient
+        {
+            NoDelay = true
+        };
+        m_Client.Connect(serverAddress, m_ServerPort);
 
-        TCPSession serverSession = new TCPSession(m_Client);
-        serverSession.onPacketReceived = (inStream) => { this.ProcessPacket(inStream); };
+        TCPSession session = new TCPSession(m_Client);
+        session.onPacketReceived = ProcessPacket;
+        session.onDisconnected = reason => EnqueueNetworkEvent(
+            new NetworkActionEvent(() => HandleSessionDisconnected(reason)));
 
-        m_LinkingContext = new LinkingContext();
-
+        LinkingContext = new LinkingContext();
         ObjectRegistry.StaticInit();
-        ObjectRegistry.Instance.RegistCreateFunction((UInt32)CLASS_ID.OBJ_AGV, AGV.Create);
+        ObjectRegistry.Instance.RegisterCreateFunction((UInt32)CLASS_ID.OBJ_AGV, AGVState.Create);
 
-        return serverSession;
+        Debug.Log($"[Viewer] Connected to {serverAddress}:{m_ServerPort}.");
+        return session;
     }
-    public void ProcessPacket(InputMemoryStream _inStream)
+
+    public void ProcessPacket(InputMemoryStream inStream)
     {
-        PACKET_TYPE packet_type = (PACKET_TYPE)_inStream.ReadByte();
-        switch (packet_type)
+        if (m_ShuttingDown)
+        {
+            return;
+        }
+
+        PACKET_TYPE packetType = (PACKET_TYPE)inStream.ReadByte();
+        switch (packetType)
         {
             case PACKET_TYPE.PT_HELLO:
-                {
-                    HandleHelloPacket_Recv(_inStream);
-                    break;
-                }
+                HandleHelloPacket(inStream);
+                break;
             case PACKET_TYPE.PT_MAZE_DATA:
-                {
-                    HandleMapDataPacket_Recv(_inStream);
-                    break;
-                }
+                HandleMapDataPacket(inStream);
+                break;
             case PACKET_TYPE.PT_REPLICATION:
-                {
-                    HandleReplicatePacket_Recv(_inStream);
-                    break;
-                }
-            case PACKET_TYPE.PT_ROUTE:
-                {
-                    
-                    break;
-                }
+                HandleReplicationPacket(inStream);
+                break;
+            default:
+                EnqueueNetworkEvent(new NetworkActionEvent(
+                    () => Debug.LogWarning($"[Viewer] Ignored legacy packet type {(byte)packetType}.")));
+                break;
         }
     }
- 
-    public void HandleMapDataPacket_Recv(InputMemoryStream _inStream)
+
+    private void HandleHelloPacket(InputMemoryStream inStream)
     {
-        Map.Instance.m_Nodes=_inStream.ReadNodes();
-        Map.Instance.m_Links=_inStream.ReadLinks();
-        
-        lock (m_Lock)
-        {
-            NetworkMapBuildEvent nbe = new NetworkMapBuildEvent(Map.Instance.m_Nodes, Map.Instance.m_Links);
-            m_NetworkEventQueue.Enqueue(nbe);
-        }        
+        UInt32 sessionID = inStream.ReadUInt32();
+        EnqueueNetworkEvent(new NetworkActionEvent(
+            () => Debug.Log($"[Viewer] Legacy session accepted. sessionID={sessionID}.")));
     }
 
-    public void HandleHelloPacket_Recv(InputMemoryStream _inStream)
+    private void HandleMapDataPacket(InputMemoryStream inStream)
     {
-        Debug.Log($"<color=cyan> Hello packet</color>을 서버에게서 받았습니다!");        
-        UInt32 sessionID = _inStream.ReadUInt32();        
-        Debug.Log($"<color=green>Session ID :</color>" + sessionID);        
-    }    
+        Dictionary<UInt32, Node> nodes = inStream.ReadNodes();
+        List<Link> links = inStream.ReadLinks();
+        EnqueueNetworkEvent(new NetworkMapBuildEvent(nodes, links, HandleMapRendered));
+    }
 
-    public void HandleReplicatePacket_Recv(InputMemoryStream _inStream)
+    private void HandleReplicationPacket(InputMemoryStream inStream)
     {
-        UInt32 commandCount = _inStream.ReadUInt32();
-        for(int i=0;i<commandCount;i++)
+        UInt32 commandCount = inStream.ReadUInt32();
+        bool createdAnyObject = false;
+
+        for (UInt32 i = 0; i < commandCount; i++)
         {
-            UInt32 networkID = _inStream.ReadUInt32();
-            REPLICATION_ACTION action = (REPLICATION_ACTION)_inStream.ReadByte();
-            switch(action)
+            UInt32 networkID = inStream.ReadUInt32();
+            REPLICATION_ACTION action = (REPLICATION_ACTION)inStream.ReadByte();
+            switch (action)
             {
                 case REPLICATION_ACTION.RT_CREATE:
-                    {
-                        UInt32 classID = _inStream.ReadUInt32();
-
-                        Object obj = ObjectRegistry.Instance.CreateObject(classID);                        
-                        m_LinkingContext.AddObject(networkID, obj);
-
-                        obj.Read(_inStream);
-
-                        lock(m_Lock)
-                        {                            
-                            NetworkSpawnEvent nse = new NetworkSpawnEvent(networkID, classID);
-                            m_NetworkEventQueue.Enqueue(nse);
-                        }
-
-                        break;
-                    }
+                    HandleCreateReplication(inStream, networkID);
+                    createdAnyObject = true;
+                    break;
                 case REPLICATION_ACTION.RT_UPDATE:
-                    {                         
-                        Object obj = m_LinkingContext.GetObject(networkID);
-                        obj.Read(_inStream);
-                        
-
-                        Vector2 pos = new Vector2(obj.m_PosX, obj.m_PosY);
-                        //Quaternion rot = obj.m_Rot;
-                        float headingAngle = obj.m_HeadingAngle;
-
-                        lock (m_Lock)
-                        {
-                            NetworkUpdateEvent nue = new NetworkUpdateEvent(networkID, pos, headingAngle);
-                            m_NetworkEventQueue.Enqueue(nue);
-                        }
-
-                        break;
+                    HandleUpdateReplication(inStream, networkID);
+                    break;
+                case REPLICATION_ACTION.RT_DESTORY:
+                    if (LinkingContext.RemoveObject(networkID))
+                    {
+                        RemoveLatestUpdate(networkID);
+                        EnqueueNetworkEvent(new NetworkDestroyEvent(networkID));
                     }
+                    break;
+                default:
+                    throw new InvalidDataException($"Unknown replication action {(byte)action}.");
+            }
+        }
+
+        if (createdAnyObject)
+        {
+            EnqueueNetworkEvent(new NetworkActionEvent(SendReadyObjectOnce));
+        }
+    }
+
+    private void HandleCreateReplication(InputMemoryStream inStream, UInt32 networkID)
+    {
+        UInt32 classID = inStream.ReadUInt32();
+        NetworkObjectState state = ObjectRegistry.Instance.CreateObject(classID);
+        if (state == null)
+        {
+            throw new InvalidDataException($"Unknown replicated ClassID {classID}.");
+        }
+
+        state.Read(inStream);
+        if (!LinkingContext.AddObject(networkID, state))
+        {
+            throw new InvalidDataException($"Duplicate replicated NetworkID {networkID}.");
+        }
+
+        EnqueueNetworkEvent(new NetworkSpawnEvent(
+            networkID,
+            classID,
+            new Vector2(state.PosX, state.PosZ),
+            state.HeadingRadians,
+            HandleObjectRendered));
+    }
+
+    private void HandleUpdateReplication(InputMemoryStream inStream, UInt32 networkID)
+    {
+        NetworkObjectState state = LinkingContext.GetObject(networkID);
+        if (state == null)
+        {
+            throw new InvalidDataException($"RT_UPDATE arrived before RT_CREATE for {networkID}.");
+        }
+
+        state.Read(inStream);
+        StoreLatestUpdate(new NetworkUpdateEvent(
+            networkID,
+            new Vector2(state.PosX, state.PosZ),
+            state.HeadingRadians));
+    }
+
+    private void HandleMapRendered(int nodeCount, int linkCount)
+    {
+        Debug.Log($"[Viewer] Map rendered. nodes={nodeCount}, links={linkCount}.");
+        if (!m_ReadyMapSent && TrySendControlPacket(PACKET_TYPE.PT_READY_MAP, "READY_MAP"))
+        {
+            m_ReadyMapSent = true;
+        }
+    }
+
+    private void HandleObjectRendered(UInt32 networkID)
+    {
+        if (networkID == 1)
+        {
+            Debug.Log("[Viewer] Physical-demo AGV 1 is visible.");
+        }
+    }
+
+    private void SendReadyObjectOnce()
+    {
+        if (!m_ReadyObjectSent && TrySendControlPacket(PACKET_TYPE.PT_READY_OBJECT, "READY_OBJECT"))
+        {
+            m_ReadyObjectSent = true;
+            Debug.Log("[Viewer] Initial replicated objects are ready.");
+        }
+    }
+
+    private bool TrySendControlPacket(PACKET_TYPE packetType, string label)
+    {
+        if (m_ShuttingDown || m_Session == null)
+        {
+            return false;
+        }
+
+        OutputMemoryStream outStream = new OutputMemoryStream();
+        outStream.WriteByte((byte)packetType);
+        if (m_Session.SendPacket(outStream, out string error))
+        {
+            return true;
+        }
+
+        Debug.LogError($"[Viewer] {label} send failed: {error}");
+        ShutdownConnection(false);
+        return false;
+    }
+
+    private void EnqueueNetworkEvent(INetworkEvent networkEvent)
+    {
+        if (networkEvent == null || m_ShuttingDown)
+        {
+            return;
+        }
+
+        lock (m_EventQueueLock)
+        {
+            if (!m_ShuttingDown)
+            {
+                m_NetworkEventQueue.Enqueue(networkEvent);
             }
         }
     }
 
-    public void CheckAndSendReadyObject()
+    private void TakeNetworkEvents(
+        out INetworkEvent[] orderedEvents,
+        out NetworkUpdateEvent[] latestUpdateEvents)
     {
-        m_SpawnedObjectCount++;
-
-        if (m_SpawnedObjectCount >= TARGET_SPAWN_COUNT)
+        lock (m_EventQueueLock)
         {
-            OutputMemoryStream outStream = new OutputMemoryStream();
-            WriteNSendReadyObjectPacket(outStream);            
+            orderedEvents = m_NetworkEventQueue.Count == 0
+                ? Array.Empty<INetworkEvent>()
+                : m_NetworkEventQueue.ToArray();
+            m_NetworkEventQueue.Clear();
+
+            if (m_LatestUpdateByNetworkID.Count == 0)
+            {
+                latestUpdateEvents = Array.Empty<NetworkUpdateEvent>();
+                return;
+            }
+
+            latestUpdateEvents =
+                new NetworkUpdateEvent[m_LatestUpdateByNetworkID.Count];
+            m_LatestUpdateByNetworkID.Values.CopyTo(latestUpdateEvents, 0);
+            m_LatestUpdateByNetworkID.Clear();
         }
     }
 
-    public void WriteNSendHelloPacket(OutputMemoryStream _inStream)
+    private void StoreLatestUpdate(NetworkUpdateEvent updateEvent)
     {
-        byte packet_type = (byte)PACKET_TYPE.PT_HELLO;
-        _inStream.WriteByte(packet_type);
-        m_Session.SendPacket(_inStream);
+        if (updateEvent == null || m_ShuttingDown)
+        {
+            return;
+        }
+
+        lock (m_EventQueueLock)
+        {
+            if (!m_ShuttingDown)
+            {
+                m_LatestUpdateByNetworkID[updateEvent.NetworkID] = updateEvent;
+            }
+        }
     }
-    public void WriteNSendReadyMapPacket(OutputMemoryStream _inStream)
+
+    private void RemoveLatestUpdate(UInt32 networkID)
     {
-        byte packet_type = (byte)PACKET_TYPE.PT_READY_MAP;
-        _inStream.WriteByte(packet_type);
-        m_Session.SendPacket(_inStream);
+        lock (m_EventQueueLock)
+        {
+            m_LatestUpdateByNetworkID.Remove(networkID);
+        }
     }
-    public void WriteNSendReadyObjectPacket(OutputMemoryStream _inStream)
+
+    private void HandleSessionDisconnected(string reason)
     {
-        byte packet_type = (byte)PACKET_TYPE.PT_READY_OBJECT;
-        _inStream.WriteByte(packet_type);
-        m_Session.SendPacket(_inStream);
+        if (m_ShuttingDown)
+        {
+            return;
+        }
+
+        Debug.LogWarning($"[Viewer] Disconnected: {reason}");
+        ShutdownConnection(false);
+    }
+
+    private void OnApplicationQuit()
+    {
+        ShutdownConnection(true);
+    }
+
+    private void OnDestroy()
+    {
+        ShutdownConnection(true);
+        if (Instance == this)
+        {
+            Instance = null;
+        }
+    }
+
+    private void ShutdownConnection(bool logShutdown)
+    {
+        if (Interlocked.Exchange(ref m_ShutdownStarted, 1) != 0)
+        {
+            return;
+        }
+
+        m_ShuttingDown = true;
+        m_Session?.Stop();
+        m_Client?.Close();
+
+        Thread receiveThread = m_ReceiveThread;
+        if (receiveThread != null && receiveThread.IsAlive && receiveThread != Thread.CurrentThread)
+        {
+            if (!receiveThread.Join(1500))
+            {
+                Debug.LogWarning("[Viewer] Receive thread did not stop within 1500 ms.");
+            }
+        }
+
+        m_ReceiveThread = null;
+        m_Session = null;
+        m_Client = null;
+        lock (m_EventQueueLock)
+        {
+            m_NetworkEventQueue.Clear();
+            m_LatestUpdateByNetworkID.Clear();
+        }
+
+        if (logShutdown)
+        {
+            Debug.Log("[Viewer] Network session stopped cleanly.");
+        }
     }
 }

@@ -1,166 +1,250 @@
-using UnityEngine;
-using System.Collections.Generic;
 using System;
+using System.Collections.Generic;
+using UnityEngine;
 
-public class RenderManager:MonoBehaviour
+public class RenderManager : MonoBehaviour
 {
-    private Dictionary<UInt32, GameObject> m_NetworkIDToGameObjectMap;
+    private const float PositionLogIntervalSeconds = 1.0f;
+    private const float PositionLogDistance = 0.01f;
+
+    private readonly Dictionary<UInt32, GameObject> m_NetworkObjects =
+        new Dictionary<UInt32, GameObject>();
+    private readonly Dictionary<UInt32, Vector2> m_LastLoggedPosition =
+        new Dictionary<UInt32, Vector2>();
+    private readonly Dictionary<UInt32, float> m_LastPositionLogTime =
+        new Dictionary<UInt32, float>();
+    private readonly List<GameObject> m_MapObjects = new List<GameObject>();
+
     public static RenderManager Instance { get; private set; }
-    
+
     public GameObject agvPrefab;
     public GameObject defaultPrefab;
     public GameObject nodePrefab;
-    public GameObject linkPrefab;    
-    public void Awake()
-    {
-        if (Instance == null)
-        {
-            Instance = this;
-            m_NetworkIDToGameObjectMap = new Dictionary<UInt32, GameObject>();
+    public GameObject linkPrefab;
 
-            agvPrefab = Resources.Load<GameObject>("AGV_Prefab");
-            defaultPrefab= Resources.Load<GameObject>("Default_Prefab");
-            nodePrefab = Resources.Load<GameObject>("Node_Prefab");            
-            linkPrefab = Resources.Load<GameObject>("Link_Prefab");
-            if (agvPrefab == null || defaultPrefab == null|| nodePrefab==null||linkPrefab==null)
-            {
-                Debug.LogError("[RenderManager] Resources 폴더에서 프리팹을 로드하는 데 실패");
-            }
-        }
-    }
-    public void OnNetworkObjectCreated(UInt32 _networkID, UInt32 _classIDObject)
+    private void Awake()
     {
-        if (m_NetworkIDToGameObjectMap.ContainsKey(_networkID))
+        if (Instance != null && Instance != this)
         {
-            Debug.LogError($"[RenderManager] 이미 존재하는 NetworkID 입니다: {_networkID}");
+            Destroy(gameObject);
             return;
         }
-        GameObject targetPrefab = defaultPrefab;
-        if (_classIDObject == (UInt32)CLASS_ID.OBJ_AGV)
+
+        Instance = this;
+        agvPrefab = agvPrefab != null ? agvPrefab : Resources.Load<GameObject>("AGV_Prefab");
+        defaultPrefab = defaultPrefab != null ? defaultPrefab : Resources.Load<GameObject>("Default_Prefab");
+        nodePrefab = nodePrefab != null ? nodePrefab : Resources.Load<GameObject>("Node_Prefab");
+        linkPrefab = linkPrefab != null ? linkPrefab : Resources.Load<GameObject>("Link_Prefab");
+
+        if (agvPrefab == null || defaultPrefab == null || nodePrefab == null || linkPrefab == null)
         {
-            targetPrefab = agvPrefab;
+            Debug.LogError("[Viewer] One or more Resources prefabs could not be loaded.");
         }
+    }
+
+    public bool OnNetworkObjectCreated(
+        UInt32 networkID,
+        UInt32 classID,
+        Vector2 position,
+        float headingRadians)
+    {
+        if (m_NetworkObjects.ContainsKey(networkID))
+        {
+            Debug.LogError($"[Viewer] NetworkID {networkID} already exists.");
+            return false;
+        }
+
+        GameObject targetPrefab = classID == (UInt32)CLASS_ID.OBJ_AGV ? agvPrefab : defaultPrefab;
         if (targetPrefab == null)
         {
-            Debug.LogError($"[RenderManager] ClassID({_classIDObject})에 대응하는 프리팹이 등록되지 않았습니다.");
+            Debug.LogError($"[Viewer] No prefab is registered for ClassID {classID}.");
+            return false;
+        }
+
+        GameObject representation = Instantiate(targetPrefab, Vector3.zero, Quaternion.identity);
+        representation.name = $"3D_NetObj_[{networkID}]";
+        m_NetworkObjects.Add(networkID, representation);
+        ApplyPose(representation, position, headingRadians);
+
+        Renderer renderer = representation.GetComponentInChildren<Renderer>();
+        if (renderer != null)
+        {
+            renderer.material.color = GetColorByID(networkID);
+        }
+
+        m_LastLoggedPosition[networkID] = position;
+        m_LastPositionLogTime[networkID] = Time.unscaledTime;
+        Debug.Log($"[Viewer] AGV {networkID} created at x={position.x:F2}, z={position.y:F2}.");
+        return true;
+    }
+
+    public void UpdateObjectPosition(UInt32 networkID, Vector2 position, float headingRadians)
+    {
+        if (!m_NetworkObjects.TryGetValue(networkID, out GameObject representation))
+        {
+            Debug.LogWarning($"[Viewer] RT_UPDATE ignored for unknown NetworkID {networkID}.");
             return;
         }
 
-        GameObject Representaion_3D = Instantiate(targetPrefab, Vector3.zero, Quaternion.identity);
-        Representaion_3D.name = $"3D_NetObj_[{_networkID}]";
-        m_NetworkIDToGameObjectMap.Add(_networkID, Representaion_3D);
+        ApplyPose(representation, position, headingRadians);
+        MaybeLogPosition(networkID, position);
+    }
 
-        Material m = Representaion_3D.GetComponent<MeshRenderer>().material;
-        m.color = GetColorByID(_networkID);
-    }
-    public void UpdateObjectPosition(UInt32 _networkID, Vector2 _position,Quaternion _rot)
-    { 
-        if(m_NetworkIDToGameObjectMap.ContainsKey(_networkID))
-        {
-            m_NetworkIDToGameObjectMap[_networkID].transform.position = new Vector3(_position.x, 0.0f, _position.y);
-            m_NetworkIDToGameObjectMap[_networkID].transform.rotation = _rot;
-        }
-    }
-    public void UpdateObjectPosition(UInt32 _networkID, Vector2 _position, float _rot)
+    public void RemoveNetworkObject(UInt32 networkID)
     {
-        if (m_NetworkIDToGameObjectMap.ContainsKey(_networkID))
+        if (!m_NetworkObjects.TryGetValue(networkID, out GameObject representation))
         {
-            m_NetworkIDToGameObjectMap[_networkID].transform.position = new Vector3(_position.x, 0.0f, _position.y);
-            float angleDeg = _rot * Mathf.Rad2Deg;
-            angleDeg = -(angleDeg) + 90f;
-            Quaternion targetRot = Quaternion.Euler(0f, angleDeg, 0f);
-            m_NetworkIDToGameObjectMap[_networkID].transform.rotation = targetRot;
+            return;
         }
+
+        Destroy(representation);
+        m_NetworkObjects.Remove(networkID);
+        m_LastLoggedPosition.Remove(networkID);
+        m_LastPositionLogTime.Remove(networkID);
+        Debug.Log($"[Viewer] Network object {networkID} destroyed.");
     }
 
-    public void MapBuild(Dictionary<UInt32, Node> _nodes,List<Link> _links)
-    {        
-        foreach (Node node in _nodes.Values)
+    public void MapBuild(Dictionary<UInt32, Node> nodes, List<Link> links)
+    {
+        if (nodes == null || links == null)
         {
-            Vector3 nodePos = new Vector3(node.m_PosX, 0.05f, node.m_PosY);
-            GameObject nodeObj = Instantiate(nodePrefab, nodePos, Quaternion.identity);
-            nodeObj.name = $"Node_[{node.m_Id}]_Type_{node.type}";
-            MapNode mapNode = nodeObj.GetComponent<MapNode>();
+            throw new ArgumentNullException(nodes == null ? nameof(nodes) : nameof(links));
+        }
+
+        ClearMapObjects();
+
+        foreach (Node node in nodes.Values)
+        {
+            Vector3 nodePosition = new Vector3(node.m_PosX, 0.05f, node.m_PosY);
+            GameObject nodeObject = Instantiate(nodePrefab, nodePosition, Quaternion.identity);
+            nodeObject.name = $"Node_[{node.m_Id}]";
+            m_MapObjects.Add(nodeObject);
+
+            MapNode mapNode = nodeObject.GetComponent<MapNode>();
             if (mapNode != null)
             {
-                mapNode.nodeID = (int)node.m_Id; 
+                mapNode.nodeID = (int)node.m_Id;
             }
-            Material m = nodeObj.GetComponent<MeshRenderer>().material;           
         }
 
-        // 2. 링크 생성 (직선과 곡선 분기 처리 완벽 적용!)
-        foreach (Link link in _links)
+        foreach (Link link in links)
         {
-            Node fromNode = _nodes[link.m_FromNodeID];
-            Node toNode = _nodes[link.m_ToNodeID];
+            if (!nodes.TryGetValue(link.m_FromNodeID, out Node fromNode) ||
+                !nodes.TryGetValue(link.m_ToNodeID, out Node toNode))
+            {
+                Debug.LogWarning($"[Viewer] Link {link.m_Id} references an unknown node.");
+                continue;
+            }
 
-            // Y축을 0.05f로 띄워서 바닥에 파묻히지 않게 함
-            Vector3 startPos = new Vector3(fromNode.m_PosX, 0.05f, fromNode.m_PosY);
-            Vector3 endPos = new Vector3(toNode.m_PosX, 0.05f, toNode.m_PosY);
+            Vector3 startPosition = new Vector3(fromNode.m_PosX, 0.05f, fromNode.m_PosY);
+            Vector3 endPosition = new Vector3(toNode.m_PosX, 0.05f, toNode.m_PosY);
+            GameObject linkObject = Instantiate(linkPrefab, startPosition, Quaternion.identity);
+            linkObject.name = $"Link_[{link.m_Id}]";
+            m_MapObjects.Add(linkObject);
 
-            GameObject linkObj = Instantiate(linkPrefab, startPos, Quaternion.identity);
-            LineRenderer lr = linkObj.GetComponent<LineRenderer>();
+            LineRenderer lineRenderer = linkObject.GetComponent<LineRenderer>();
+            if (lineRenderer == null)
+            {
+                Debug.LogWarning($"[Viewer] Link prefab has no LineRenderer for link {link.m_Id}.");
+                continue;
+            }
 
-            //월드 좌표계 사용 강제 설정 (곡선 그리기 훨씬 편해집니다)
-            lr.useWorldSpace = true;
-
-            //곡선일 때와 직선일 때를 나눠서 선을 그립니다.
+            lineRenderer.useWorldSpace = true;
             if (link.m_Type == 1)
             {
-                int resolution = 20; // 선을 20조각으로 쪼개서 부드럽게 만듦
-                lr.positionCount = resolution + 1;
-
-                // C++ 서버에서 받은 제어점 데이터 
-                // (주의: 서버의 Z값이 유니티 2D 탑뷰상 Y로 들어오고 있다면 m_CZ1을 Y자리에 넣으세요)
-                Vector3 p0 = startPos;
-                Vector3 p1 = new Vector3(link.m_CX1, 0.05f, link.m_CZ1);
-                Vector3 p2 = new Vector3(link.m_CX2, 0.05f, link.m_CZ2);
-                Vector3 p3 = endPos;
-
-                Debug.DrawLine(p0, p1, Color.red, 10f);  // 출발점 -> 제어점1 (빨간선)
-                Debug.DrawLine(p3, p2, Color.blue, 10f); // 도착점 -> 제어점2 (파란선)
-
-                for (int i = 0; i <= resolution; i++)
-                {
-                    float t = i / (float)resolution;
-                    float u = 1.0f - t;
-
-                    float tt = t * t;
-                    float uu = u * u;
-                    float uuu = uu * u;
-                    float ttt = tt * t;
-
-                    // 3차 베지어 위치 계산 (C++ 서버와 100% 동일한 공식)
-                    Vector3 pos = (uuu * p0) +
-                                  (3f * uu * t * p1) +
-                                  (3f * u * tt * p2) +
-                                  (ttt * p3);
-
-                    lr.SetPosition(i, pos);
-                }
+                DrawBezierLink(lineRenderer, startPosition, endPosition, link);
             }
-            else // 직선 모드
+            else
             {
-                lr.positionCount = 2;
-                lr.SetPosition(0, startPos);
-                lr.SetPosition(1, endPos);
+                lineRenderer.positionCount = 2;
+                lineRenderer.SetPosition(0, startPosition);
+                lineRenderer.SetPosition(1, endPosition);
             }
         }
     }
+
     public Color GetColorByID(UInt32 networkID)
     {
         UnityEngine.Random.State oldState = UnityEngine.Random.state;
-
-        // 2. 네트워크 ID를 시드 값으로 설정합니다. 
-        // (이렇게 하면 이 ID는 항상 같은 난수 패턴을 가집니다)
         UnityEngine.Random.InitState((int)networkID);
-
-        Color randomColor = UnityEngine.Random.ColorHSV(0f, 1f, 0.8f, 1f, 0.8f, 1f);
-
+        Color color = UnityEngine.Random.ColorHSV(0f, 1f, 0.8f, 1f, 0.8f, 1f);
         UnityEngine.Random.state = oldState;
+        return color;
+    }
 
-        return randomColor;
+    private static void ApplyPose(GameObject representation, Vector2 position, float headingRadians)
+    {
+        representation.transform.position = new Vector3(position.x, 0.0f, position.y);
+        float angleDegrees = -(headingRadians * Mathf.Rad2Deg) + 90f;
+        representation.transform.rotation = Quaternion.Euler(0f, angleDegrees, 0f);
+    }
+
+    private void MaybeLogPosition(UInt32 networkID, Vector2 position)
+    {
+        if (networkID != 1)
+        {
+            return;
+        }
+
+        float now = Time.unscaledTime;
+        bool intervalElapsed = !m_LastPositionLogTime.TryGetValue(networkID, out float lastLogTime) ||
+                               now - lastLogTime >= PositionLogIntervalSeconds;
+        bool moved = !m_LastLoggedPosition.TryGetValue(networkID, out Vector2 lastPosition) ||
+                     Vector2.Distance(lastPosition, position) >= PositionLogDistance;
+        if (!intervalElapsed || !moved)
+        {
+            return;
+        }
+
+        m_LastPositionLogTime[networkID] = now;
+        m_LastLoggedPosition[networkID] = position;
+        Debug.Log($"[Viewer] AGV 1 position x={position.x:F2}, z={position.y:F2}.");
+    }
+
+    private static void DrawBezierLink(
+        LineRenderer lineRenderer,
+        Vector3 startPosition,
+        Vector3 endPosition,
+        Link link)
+    {
+        const int resolution = 20;
+        lineRenderer.positionCount = resolution + 1;
+
+        Vector3 control1 = new Vector3(link.m_CX1, 0.05f, link.m_CZ1);
+        Vector3 control2 = new Vector3(link.m_CX2, 0.05f, link.m_CZ2);
+        for (int i = 0; i <= resolution; i++)
+        {
+            float t = i / (float)resolution;
+            float u = 1.0f - t;
+            float tt = t * t;
+            float uu = u * u;
+            Vector3 position =
+                (uu * u * startPosition) +
+                (3f * uu * t * control1) +
+                (3f * u * tt * control2) +
+                (tt * t * endPosition);
+            lineRenderer.SetPosition(i, position);
+        }
+    }
+
+    private void ClearMapObjects()
+    {
+        foreach (GameObject mapObject in m_MapObjects)
+        {
+            if (mapObject != null)
+            {
+                Destroy(mapObject);
+            }
+        }
+
+        m_MapObjects.Clear();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
+        }
     }
 }
-
-

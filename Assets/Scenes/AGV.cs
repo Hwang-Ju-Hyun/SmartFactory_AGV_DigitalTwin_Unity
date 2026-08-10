@@ -1,42 +1,34 @@
 using System;
 using UnityEngine;
 
-public class AGV : Object
+public sealed class AGVState : NetworkObjectState
 {
-   
-    private void Awake()
+    public AGVState()
+        : base((UInt32)CLASS_ID.OBJ_AGV)
     {
-        m_ClassID = (UInt32)CLASS_ID.OBJ_AGV;
-
     }
-    public override UInt32 GetClassID() { return m_ClassID; }
-    public static AGV Create()
+
+    public static NetworkObjectState Create()
     {
-        return new AGV();
+        return new AGVState();
     }
-    public override void Read(InputMemoryStream _inStream)
+
+    public override void Read(InputMemoryStream inStream)
     {
-        m_PosX = _inStream.ReadFloat();
-        m_PosY = _inStream.ReadFloat();
-
-        //float qx = _inStream.ReadFloat();
-        //float qy = _inStream.ReadFloat();
-        //float qz= _inStream.ReadFloat();
-        //float qw= _inStream.ReadFloat();
-
-        //Quaternion quaternion = new Quaternion(qx, qy, qz, qw);
-        //m_Rot= quaternion;
-
-        m_HeadingAngle= _inStream.ReadFloat();
-
+        PosX = inStream.ReadFloat();
+        PosZ = inStream.ReadFloat();
+        HeadingRadians = inStream.ReadFloat();
     }
+}
+
+// View-only component retained on AGV_Prefab. It is never created with new.
+public class AGV : MonoBehaviour
+{
     private void OnCollisionEnter(Collision collision)
     {
-        if (collision.gameObject.GetComponentInChildren<Object>().GetClassID() == (UInt32)CLASS_ID.OBJ_AGV)
+        if (collision.gameObject.GetComponentInChildren<AGV>() != null)
         {
             Debug.Log("OnCollisionEnter " + collision.gameObject.name);
         }
-        
     }
-
 }

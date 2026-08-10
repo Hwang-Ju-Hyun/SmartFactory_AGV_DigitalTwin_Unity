@@ -1,66 +1,126 @@
-using UnityEngine;
 using System;
-using NUnit.Framework;
 using System.Collections.Generic;
+using UnityEngine;
 
 public interface INetworkEvent
 {
-    void Excute();
+    void Execute();
 }
 
-public class NetworkMapBuildEvent:INetworkEvent
-{    
-    private Dictionary<UInt32,Node> m_Nodes;
-    private List<Link> m_Links;
-    public NetworkMapBuildEvent(Dictionary<UInt32, Node> nodes, List<Link> links)
+public sealed class NetworkMapBuildEvent : INetworkEvent
+{
+    private readonly Dictionary<UInt32, Node> m_Nodes;
+    private readonly List<Link> m_Links;
+    private readonly Action<int, int> m_OnRendered;
+
+    public NetworkMapBuildEvent(
+        Dictionary<UInt32, Node> nodes,
+        List<Link> links,
+        Action<int, int> onRendered)
     {
         m_Nodes = nodes;
         m_Links = links;
+        m_OnRendered = onRendered;
     }
-    public void Excute()
+
+    public void Execute()
     {
+        if (Map.Instance == null || RenderManager.Instance == null)
+        {
+            throw new InvalidOperationException("Map or RenderManager is not initialized.");
+        }
+
+        Map.Instance.SetData(m_Nodes, m_Links);
         RenderManager.Instance.MapBuild(m_Nodes, m_Links);
+        m_OnRendered?.Invoke(m_Nodes.Count, m_Links.Count);
     }
 }
 
-public class NetworkSpawnEvent:INetworkEvent
+public sealed class NetworkSpawnEvent : INetworkEvent
 {
-    private UInt32 m_networkID, m_classID;
-    public NetworkSpawnEvent(UInt32 _networkID,UInt32 _classID)
+    private readonly UInt32 m_NetworkID;
+    private readonly UInt32 m_ClassID;
+    private readonly Vector2 m_Position;
+    private readonly float m_HeadingRadians;
+    private readonly Action<UInt32> m_OnCreated;
+
+    public NetworkSpawnEvent(
+        UInt32 networkID,
+        UInt32 classID,
+        Vector2 position,
+        float headingRadians,
+        Action<UInt32> onCreated)
     {
-        m_networkID = _networkID;
-        m_classID = _classID;
+        m_NetworkID = networkID;
+        m_ClassID = classID;
+        m_Position = position;
+        m_HeadingRadians = headingRadians;
+        m_OnCreated = onCreated;
     }
 
-    public void Excute() 
-    {                   
-        RenderManager.Instance.OnNetworkObjectCreated(m_networkID, m_classID);
-        
+    public void Execute()
+    {
+        if (RenderManager.Instance == null ||
+            !RenderManager.Instance.OnNetworkObjectCreated(
+                m_NetworkID,
+                m_ClassID,
+                m_Position,
+                m_HeadingRadians))
+        {
+            throw new InvalidOperationException($"Failed to render network object {m_NetworkID}.");
+        }
+
+        m_OnCreated?.Invoke(m_NetworkID);
     }
 }
 
-//todo: ¹Ì¿Ï¼º
-public class NetworkUpdateEvent : INetworkEvent
+public sealed class NetworkUpdateEvent : INetworkEvent
 {
-    private UInt32 m_networkID;
-    private Vector2 m_position;
-    Quaternion m_rotation;
-    private float m_headingAngle;
-    public NetworkUpdateEvent(UInt32 _networkID, Vector2 _position, Quaternion _quat)
+    private readonly UInt32 m_NetworkID;
+    private readonly Vector2 m_Position;
+    private readonly float m_HeadingRadians;
+
+    public NetworkUpdateEvent(UInt32 networkID, Vector2 position, float headingRadians)
     {
-        m_networkID = _networkID;
-        m_position = _position;
-        m_rotation = _quat;
-    }
-    public NetworkUpdateEvent(UInt32 _networkID, Vector2 _position, float _headingAngle)
-    {
-        m_networkID = _networkID;
-        m_position = _position;
-        m_headingAngle= _headingAngle;
+        m_NetworkID = networkID;
+        m_Position = position;
+        m_HeadingRadians = headingRadians;
     }
 
-    public void Excute()
+    public UInt32 NetworkID => m_NetworkID;
+
+    public void Execute()
     {
-        RenderManager.Instance.UpdateObjectPosition(m_networkID, m_position, m_headingAngle);
+        RenderManager.Instance.UpdateObjectPosition(m_NetworkID, m_Position, m_HeadingRadians);
+    }
+}
+
+public sealed class NetworkDestroyEvent : INetworkEvent
+{
+    private readonly UInt32 m_NetworkID;
+
+    public NetworkDestroyEvent(UInt32 networkID)
+    {
+        m_NetworkID = networkID;
+    }
+
+    public void Execute()
+    {
+        RenderManager.Instance.RemoveNetworkObject(m_NetworkID);
+    }
+}
+
+public sealed class NetworkActionEvent : INetworkEvent
+{
+    private readonly Action m_Action;
+
+    public NetworkActionEvent(Action action)
+    {
+        m_Action = action;
+    }
+
+    public void Execute()
+    {
+        m_Action?.Invoke();
     }
 }
