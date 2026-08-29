@@ -6,6 +6,11 @@ public class RenderManager : MonoBehaviour
 {
     private const float PositionLogIntervalSeconds = 1.0f;
     private const float PositionLogDistance = 0.01f;
+    private const float VisionVerticalOffset = 0.08f;
+    private const float VisionScaleMultiplier = 1.05f;
+
+    private static readonly Color VisionMeasuredColor = Color.cyan;
+    private static readonly Color VisionHeldColor = Color.yellow;
 
     private readonly Dictionary<UInt32, GameObject> m_NetworkObjects =
         new Dictionary<UInt32, GameObject>();
@@ -13,6 +18,14 @@ public class RenderManager : MonoBehaviour
         new Dictionary<UInt32, Vector2>();
     private readonly Dictionary<UInt32, float> m_LastPositionLogTime =
         new Dictionary<UInt32, float>();
+    private readonly Dictionary<UInt32, GameObject> m_VisionObjects =
+        new Dictionary<UInt32, GameObject>();
+    private readonly Dictionary<UInt32, List<Material>> m_VisionMaterials =
+        new Dictionary<UInt32, List<Material>>();
+    private readonly Dictionary<UInt32, VisionTrackingState> m_LastVisionState =
+        new Dictionary<UInt32, VisionTrackingState>();
+    private readonly Dictionary<UInt32, bool> m_LastVisionPoseValid =
+        new Dictionary<UInt32, bool>();
     private readonly List<GameObject> m_MapObjects = new List<GameObject>();
 
     public static RenderManager Instance { get; private set; }
@@ -104,6 +117,72 @@ public class RenderManager : MonoBehaviour
         Debug.Log($"[Viewer] Network object {networkID} destroyed.");
     }
 
+    public void UpdateVisionObservation(VisionObservationPacket packet)
+    {
+        bool hadState = m_LastVisionState.TryGetValue(
+            packet.AgvID,
+            out VisionTrackingState previousState);
+        bool hadPoseValid = m_LastVisionPoseValid.TryGetValue(
+            packet.AgvID,
+            out bool previousPoseValid);
+        bool displayStateChanged = !hadState || !hadPoseValid ||
+                                   previousState != packet.TrackingState ||
+                                   previousPoseValid != packet.PoseValid;
+
+        m_LastVisionState[packet.AgvID] = packet.TrackingState;
+        m_LastVisionPoseValid[packet.AgvID] = packet.PoseValid;
+
+        bool shouldShow = packet.PoseValid &&
+                          packet.TrackingState != VisionTrackingState.Lost;
+        if (!shouldShow)
+        {
+            if (m_VisionObjects.TryGetValue(packet.AgvID, out GameObject hiddenObject))
+            {
+                hiddenObject.SetActive(false);
+            }
+
+            if (displayStateChanged)
+            {
+                Debug.Log(
+                    $"[Viewer] Vision AGV {packet.AgvID} hidden " +
+                    $"state={packet.TrackingState}, valid={packet.PoseValid}, " +
+                    $"sequence={packet.TransportSequence}, ageMs={packet.ServerReceiveAgeMs}.");
+            }
+
+            return;
+        }
+
+        bool created = false;
+        if (!m_VisionObjects.TryGetValue(packet.AgvID, out GameObject representation))
+        {
+            representation = CreateVisionObject(packet.AgvID);
+            created = true;
+        }
+
+        if (!representation.activeSelf)
+        {
+            representation.SetActive(true);
+        }
+
+        ApplyPose(
+            representation,
+            new Vector2(packet.ServerX, packet.ServerZ),
+            packet.HeadingRadians,
+            VisionVerticalOffset);
+
+        if (created || displayStateChanged)
+        {
+            Color color = packet.TrackingState == VisionTrackingState.Measured
+                ? VisionMeasuredColor
+                : VisionHeldColor;
+            ApplyVisionColor(packet.AgvID, color);
+            Debug.Log(
+                $"[Viewer] Vision AGV {packet.AgvID} visible " +
+                $"state={packet.TrackingState}, sequence={packet.TransportSequence}, " +
+                $"ageMs={packet.ServerReceiveAgeMs}.");
+        }
+    }
+
     public void MapBuild(Dictionary<UInt32, Node> nodes, List<Link> links)
     {
         if (nodes == null || links == null)
@@ -172,9 +251,71 @@ public class RenderManager : MonoBehaviour
         return color;
     }
 
-    private static void ApplyPose(GameObject representation, Vector2 position, float headingRadians)
+    private GameObject CreateVisionObject(UInt32 agvID)
     {
-        representation.transform.position = new Vector3(position.x, 0.0f, position.y);
+        if (agvPrefab == null)
+        {
+            throw new InvalidOperationException("AGV prefab is unavailable for the Vision overlay.");
+        }
+
+        GameObject representation = Instantiate(agvPrefab, Vector3.zero, Quaternion.identity);
+        representation.name = $"Vision_AGV_[{agvID}]";
+        representation.transform.localScale *= VisionScaleMultiplier;
+
+        foreach (Collider collider in representation.GetComponentsInChildren<Collider>(true))
+        {
+            collider.enabled = false;
+        }
+
+        foreach (Rigidbody rigidbody in representation.GetComponentsInChildren<Rigidbody>(true))
+        {
+            rigidbody.useGravity = false;
+            rigidbody.isKinematic = true;
+            rigidbody.detectCollisions = false;
+        }
+
+        List<Material> instanceMaterials = new List<Material>();
+        foreach (Renderer renderer in representation.GetComponentsInChildren<Renderer>(true))
+        {
+            // renderer.materials creates per-renderer instances. Changing the
+            // Vision colors therefore cannot modify the prefab or planned AGV.
+            foreach (Material material in renderer.materials)
+            {
+                if (material != null)
+                {
+                    instanceMaterials.Add(material);
+                }
+            }
+        }
+
+        m_VisionObjects.Add(agvID, representation);
+        m_VisionMaterials.Add(agvID, instanceMaterials);
+        return representation;
+    }
+
+    private void ApplyVisionColor(UInt32 agvID, Color color)
+    {
+        if (!m_VisionMaterials.TryGetValue(agvID, out List<Material> materials))
+        {
+            return;
+        }
+
+        foreach (Material material in materials)
+        {
+            if (material != null)
+            {
+                material.color = color;
+            }
+        }
+    }
+
+    private static void ApplyPose(
+        GameObject representation,
+        Vector2 position,
+        float headingRadians,
+        float verticalOffset = 0.0f)
+    {
+        representation.transform.position = new Vector3(position.x, verticalOffset, position.y);
         float angleDegrees = -(headingRadians * Mathf.Rad2Deg) + 90f;
         representation.transform.rotation = Quaternion.Euler(0f, angleDegrees, 0f);
     }
@@ -242,6 +383,22 @@ public class RenderManager : MonoBehaviour
 
     private void OnDestroy()
     {
+        foreach (List<Material> materials in m_VisionMaterials.Values)
+        {
+            foreach (Material material in materials)
+            {
+                if (material != null)
+                {
+                    Destroy(material);
+                }
+            }
+        }
+
+        m_VisionMaterials.Clear();
+        m_VisionObjects.Clear();
+        m_LastVisionState.Clear();
+        m_LastVisionPoseValid.Clear();
+
         if (Instance == this)
         {
             Instance = null;

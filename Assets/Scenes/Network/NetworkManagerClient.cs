@@ -12,6 +12,7 @@ public enum PACKET_TYPE : byte
     PT_HELLO = 2,
     PT_READY_MAP = 4,
     PT_READY_OBJECT = 5,
+    PT_VISION_OBSERVATION = 6,
 
     // Deprecated legacy robot IDs. The Unity viewer never uses RobotProtocol.
     PT_ROUTE = 10,
@@ -45,6 +46,8 @@ public class NetworkManagerClient : MonoBehaviour
     private readonly Queue<INetworkEvent> m_NetworkEventQueue = new Queue<INetworkEvent>();
     private readonly Dictionary<UInt32, NetworkUpdateEvent> m_LatestUpdateByNetworkID =
         new Dictionary<UInt32, NetworkUpdateEvent>();
+    private readonly Dictionary<UInt32, VisionObservationEvent> m_LatestVisionByAgvID =
+        new Dictionary<UInt32, VisionObservationEvent>();
     private readonly object m_EventQueueLock = new object();
 
     private TCPSession m_Session;
@@ -106,7 +109,8 @@ public class NetworkManagerClient : MonoBehaviour
     {
         TakeNetworkEvents(
             out INetworkEvent[] orderedEvents,
-            out NetworkUpdateEvent[] latestUpdateEvents);
+            out NetworkUpdateEvent[] latestUpdateEvents,
+            out VisionObservationEvent[] latestVisionEvents);
 
         foreach (INetworkEvent networkEvent in orderedEvents)
         {
@@ -136,6 +140,25 @@ public class NetworkManagerClient : MonoBehaviour
             catch (Exception exception)
             {
                 Debug.LogError($"[Viewer] AGV position update failed: {exception.Message}");
+                ShutdownConnection(false);
+                break;
+            }
+        }
+
+        if (m_ShuttingDown)
+        {
+            return;
+        }
+
+        foreach (VisionObservationEvent visionEvent in latestVisionEvents)
+        {
+            try
+            {
+                visionEvent.Execute();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"[Viewer] Vision position update failed: {exception.Message}");
                 ShutdownConnection(false);
                 break;
             }
@@ -182,6 +205,9 @@ public class NetworkManagerClient : MonoBehaviour
                 break;
             case PACKET_TYPE.PT_REPLICATION:
                 HandleReplicationPacket(inStream);
+                break;
+            case PACKET_TYPE.PT_VISION_OBSERVATION:
+                HandleVisionObservationPacket(inStream);
                 break;
             default:
                 EnqueueNetworkEvent(new NetworkActionEvent(
@@ -278,6 +304,12 @@ public class NetworkManagerClient : MonoBehaviour
             state.HeadingRadians));
     }
 
+    private void HandleVisionObservationPacket(InputMemoryStream inStream)
+    {
+        VisionObservationPacket packet = VisionObservationPacket.Deserialize(inStream);
+        StoreLatestVisionObservation(new VisionObservationEvent(packet));
+    }
+
     private void HandleMapRendered(int nodeCount, int linkCount)
     {
         Debug.Log($"[Viewer] Map rendered. nodes={nodeCount}, links={linkCount}.");
@@ -341,7 +373,8 @@ public class NetworkManagerClient : MonoBehaviour
 
     private void TakeNetworkEvents(
         out INetworkEvent[] orderedEvents,
-        out NetworkUpdateEvent[] latestUpdateEvents)
+        out NetworkUpdateEvent[] latestUpdateEvents,
+        out VisionObservationEvent[] latestVisionEvents)
     {
         lock (m_EventQueueLock)
         {
@@ -353,13 +386,26 @@ public class NetworkManagerClient : MonoBehaviour
             if (m_LatestUpdateByNetworkID.Count == 0)
             {
                 latestUpdateEvents = Array.Empty<NetworkUpdateEvent>();
-                return;
+            }
+            else
+            {
+                latestUpdateEvents =
+                    new NetworkUpdateEvent[m_LatestUpdateByNetworkID.Count];
+                m_LatestUpdateByNetworkID.Values.CopyTo(latestUpdateEvents, 0);
+                m_LatestUpdateByNetworkID.Clear();
             }
 
-            latestUpdateEvents =
-                new NetworkUpdateEvent[m_LatestUpdateByNetworkID.Count];
-            m_LatestUpdateByNetworkID.Values.CopyTo(latestUpdateEvents, 0);
-            m_LatestUpdateByNetworkID.Clear();
+            if (m_LatestVisionByAgvID.Count == 0)
+            {
+                latestVisionEvents = Array.Empty<VisionObservationEvent>();
+            }
+            else
+            {
+                latestVisionEvents =
+                    new VisionObservationEvent[m_LatestVisionByAgvID.Count];
+                m_LatestVisionByAgvID.Values.CopyTo(latestVisionEvents, 0);
+                m_LatestVisionByAgvID.Clear();
+            }
         }
     }
 
@@ -375,6 +421,25 @@ public class NetworkManagerClient : MonoBehaviour
             if (!m_ShuttingDown)
             {
                 m_LatestUpdateByNetworkID[updateEvent.NetworkID] = updateEvent;
+            }
+        }
+    }
+
+    private void StoreLatestVisionObservation(VisionObservationEvent visionEvent)
+    {
+        if (visionEvent == null || m_ShuttingDown)
+        {
+            return;
+        }
+
+        lock (m_EventQueueLock)
+        {
+            if (!m_ShuttingDown)
+            {
+                // Server TCP is ordered. Keep the last arrived state even when
+                // its diagnostic sequence is equal (timeout -> LOST) or lower
+                // (Vision process started a new transport session).
+                m_LatestVisionByAgvID[visionEvent.AgvID] = visionEvent;
             }
         }
     }
@@ -439,6 +504,7 @@ public class NetworkManagerClient : MonoBehaviour
         {
             m_NetworkEventQueue.Clear();
             m_LatestUpdateByNetworkID.Clear();
+            m_LatestVisionByAgvID.Clear();
         }
 
         if (logShutdown)

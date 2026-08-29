@@ -110,6 +110,28 @@ public sealed class NetworkDestroyEvent : INetworkEvent
     }
 }
 
+public sealed class VisionObservationEvent : INetworkEvent
+{
+    private readonly VisionObservationPacket m_Packet;
+
+    public VisionObservationEvent(VisionObservationPacket packet)
+    {
+        m_Packet = packet;
+    }
+
+    public UInt32 AgvID => m_Packet.AgvID;
+
+    public void Execute()
+    {
+        if (RenderManager.Instance == null)
+        {
+            throw new InvalidOperationException("RenderManager is not initialized.");
+        }
+
+        RenderManager.Instance.UpdateVisionObservation(m_Packet);
+    }
+}
+
 public sealed class NetworkActionEvent : INetworkEvent
 {
     private readonly Action m_Action;
