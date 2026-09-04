@@ -9,11 +9,32 @@ public class RenderManager : MonoBehaviour
     private const float VisionVerticalOffset = 0.08f;
     private const float VisionScaleMultiplier = 1.05f;
 
+    [Header("Runtime Viewer")]
+    [SerializeField] private bool showRuntimeNodeVisuals = false;
+    [SerializeField, Min(0.0f)] private float agvVerticalOffset = 0.03f;
+
+    private static readonly Color[] AgvColors =
+    {
+        new Color32(239, 68, 68, 255),
+        new Color32(249, 115, 22, 255),
+        new Color32(245, 158, 11, 255),
+        new Color32(234, 179, 8, 255),
+        new Color32(236, 72, 153, 255),
+        new Color32(217, 70, 239, 255),
+        new Color32(190, 24, 93, 255),
+        new Color32(153, 27, 27, 255),
+        new Color32(194, 65, 12, 255),
+        new Color32(161, 98, 7, 255),
+        new Color32(255, 228, 230, 255),
+        new Color32(253, 186, 116, 255)
+    };
+
     private static readonly Color VisionMeasuredColor = Color.cyan;
     private static readonly Color VisionHeldColor = Color.yellow;
 
     private readonly Dictionary<UInt32, GameObject> m_NetworkObjects =
         new Dictionary<UInt32, GameObject>();
+    private readonly HashSet<UInt32> m_AgvNetworkIDs = new HashSet<UInt32>();
     private readonly Dictionary<UInt32, Vector2> m_LastLoggedPosition =
         new Dictionary<UInt32, Vector2>();
     private readonly Dictionary<UInt32, float> m_LastPositionLogTime =
@@ -77,7 +98,12 @@ public class RenderManager : MonoBehaviour
         GameObject representation = Instantiate(targetPrefab, Vector3.zero, Quaternion.identity);
         representation.name = $"3D_NetObj_[{networkID}]";
         m_NetworkObjects.Add(networkID, representation);
-        ApplyPose(representation, position, headingRadians);
+        bool isAgv = classID == (UInt32)CLASS_ID.OBJ_AGV;
+        if (isAgv)
+        {
+            m_AgvNetworkIDs.Add(networkID);
+        }
+        ApplyPose(representation, position, headingRadians, isAgv ? agvVerticalOffset : 0.0f);
 
         Renderer renderer = representation.GetComponentInChildren<Renderer>();
         if (renderer != null)
@@ -99,7 +125,8 @@ public class RenderManager : MonoBehaviour
             return;
         }
 
-        ApplyPose(representation, position, headingRadians);
+        float verticalOffset = m_AgvNetworkIDs.Contains(networkID) ? agvVerticalOffset : 0.0f;
+        ApplyPose(representation, position, headingRadians, verticalOffset);
         MaybeLogPosition(networkID, position);
     }
 
@@ -112,6 +139,7 @@ public class RenderManager : MonoBehaviour
 
         Destroy(representation);
         m_NetworkObjects.Remove(networkID);
+        m_AgvNetworkIDs.Remove(networkID);
         m_LastLoggedPosition.Remove(networkID);
         m_LastPositionLogTime.Remove(networkID);
         Debug.Log($"[Viewer] Network object {networkID} destroyed.");
@@ -204,6 +232,8 @@ public class RenderManager : MonoBehaviour
             {
                 mapNode.nodeID = (int)node.m_Id;
             }
+
+            SetRenderersEnabled(nodeObject, showRuntimeNodeVisuals);
         }
 
         foreach (Link link in links)
@@ -244,11 +274,7 @@ public class RenderManager : MonoBehaviour
 
     public Color GetColorByID(UInt32 networkID)
     {
-        UnityEngine.Random.State oldState = UnityEngine.Random.state;
-        UnityEngine.Random.InitState((int)networkID);
-        Color color = UnityEngine.Random.ColorHSV(0f, 1f, 0.8f, 1f, 0.8f, 1f);
-        UnityEngine.Random.state = oldState;
-        return color;
+        return AgvColors[networkID % (UInt32)AgvColors.Length];
     }
 
     private GameObject CreateVisionObject(UInt32 agvID)
@@ -318,6 +344,14 @@ public class RenderManager : MonoBehaviour
         representation.transform.position = new Vector3(position.x, verticalOffset, position.y);
         float angleDegrees = -(headingRadians * Mathf.Rad2Deg) + 90f;
         representation.transform.rotation = Quaternion.Euler(0f, angleDegrees, 0f);
+    }
+
+    private static void SetRenderersEnabled(GameObject target, bool enabled)
+    {
+        foreach (Renderer renderer in target.GetComponentsInChildren<Renderer>(true))
+        {
+            renderer.enabled = enabled;
+        }
     }
 
     private void MaybeLogPosition(UInt32 networkID, Vector2 position)
@@ -396,6 +430,7 @@ public class RenderManager : MonoBehaviour
 
         m_VisionMaterials.Clear();
         m_VisionObjects.Clear();
+        m_AgvNetworkIDs.Clear();
         m_LastVisionState.Clear();
         m_LastVisionPoseValid.Clear();
 
