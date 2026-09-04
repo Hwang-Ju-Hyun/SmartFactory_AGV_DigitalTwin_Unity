@@ -13,6 +13,13 @@ public class RenderManager : MonoBehaviour
     [SerializeField] private bool showRuntimeNodeVisuals = false;
     [SerializeField, Min(0.0f)] private float agvVerticalOffset = 0.03f;
 
+    [Header("Cargo Visualization")]
+    [SerializeField] private GameObject[] cargoPrefabs = Array.Empty<GameObject>();
+    [SerializeField] private Vector3 cargoMountLocalPosition = new Vector3(0.0f, 1.6f, 0.0f);
+    [SerializeField] private Vector3 cargoLocalPosition = Vector3.zero;
+    [SerializeField] private Vector3 cargoLocalEulerAngles = Vector3.zero;
+    [SerializeField] private Vector3 cargoLocalScale = new Vector3(2.0f, 2.0f, 2.0f);
+
     private static readonly Color[] AgvColors =
     {
         new Color32(239, 68, 68, 255),
@@ -35,6 +42,12 @@ public class RenderManager : MonoBehaviour
     private readonly Dictionary<UInt32, GameObject> m_NetworkObjects =
         new Dictionary<UInt32, GameObject>();
     private readonly HashSet<UInt32> m_AgvNetworkIDs = new HashSet<UInt32>();
+    private readonly Dictionary<UInt32, UInt32> m_LastCargoSequenceByAgvID =
+        new Dictionary<UInt32, UInt32>();
+    private readonly Dictionary<UInt32, CargoStatePacket> m_PendingCargoByAgvID =
+        new Dictionary<UInt32, CargoStatePacket>();
+    private readonly Dictionary<UInt32, CargoAttachment> m_CargoByAgvID =
+        new Dictionary<UInt32, CargoAttachment>();
     private readonly Dictionary<UInt32, Vector2> m_LastLoggedPosition =
         new Dictionary<UInt32, Vector2>();
     private readonly Dictionary<UInt32, float> m_LastPositionLogTime =
@@ -55,6 +68,14 @@ public class RenderManager : MonoBehaviour
     public GameObject defaultPrefab;
     public GameObject nodePrefab;
     public GameObject linkPrefab;
+
+    private sealed class CargoAttachment
+    {
+        public UInt32 TaskId;
+        public UInt32 CargoId;
+        public UInt32 Sequence;
+        public GameObject Instance;
+    }
 
     private void Awake()
     {
@@ -105,6 +126,12 @@ public class RenderManager : MonoBehaviour
         }
         ApplyPose(representation, position, headingRadians, isAgv ? agvVerticalOffset : 0.0f);
 
+        if (isAgv && m_PendingCargoByAgvID.TryGetValue(networkID, out CargoStatePacket pendingCargo))
+        {
+            m_PendingCargoByAgvID.Remove(networkID);
+            ApplyCargoStateToCreatedAgv(pendingCargo, representation);
+        }
+
         Renderer renderer = representation.GetComponentInChildren<Renderer>();
         if (renderer != null)
         {
@@ -137,12 +164,191 @@ public class RenderManager : MonoBehaviour
             return;
         }
 
+        RemoveCargoAttachment(networkID);
+        m_PendingCargoByAgvID.Remove(networkID);
+        m_LastCargoSequenceByAgvID.Remove(networkID);
         Destroy(representation);
         m_NetworkObjects.Remove(networkID);
         m_AgvNetworkIDs.Remove(networkID);
         m_LastLoggedPosition.Remove(networkID);
         m_LastPositionLogTime.Remove(networkID);
         Debug.Log($"[Viewer] Network object {networkID} destroyed.");
+    }
+
+    public void BeginCargoSession()
+    {
+        ClearCargoSessionState();
+    }
+
+    public void EndCargoSession()
+    {
+        ClearCargoSessionState();
+    }
+
+    public void ApplyCargoState(CargoStatePacket packet)
+    {
+        if (m_LastCargoSequenceByAgvID.TryGetValue(packet.AgvId, out UInt32 lastSequence) &&
+            packet.Sequence <= lastSequence)
+        {
+            return;
+        }
+
+        m_LastCargoSequenceByAgvID[packet.AgvId] = packet.Sequence;
+
+        if (!m_AgvNetworkIDs.Contains(packet.AgvId) ||
+            !m_NetworkObjects.TryGetValue(packet.AgvId, out GameObject agvObject))
+        {
+            m_PendingCargoByAgvID[packet.AgvId] = packet;
+            Debug.Log(
+                $"[Cargo] PENDING agvID={packet.AgvId} reason=AGV_NOT_CREATED");
+            return;
+        }
+
+        m_PendingCargoByAgvID.Remove(packet.AgvId);
+        ApplyCargoStateToCreatedAgv(packet, agvObject);
+    }
+
+    private void ApplyCargoStateToCreatedAgv(CargoStatePacket packet, GameObject agvObject)
+    {
+        if (packet.State == CargoLoadState.Loaded)
+        {
+            ApplyLoadedCargo(packet, agvObject);
+            return;
+        }
+
+        ApplyUnloadedCargo(packet);
+    }
+
+    private void ApplyLoadedCargo(CargoStatePacket packet, GameObject agvObject)
+    {
+        if (m_CargoByAgvID.TryGetValue(packet.AgvId, out CargoAttachment currentCargo))
+        {
+            if (currentCargo.TaskId == packet.TaskId && currentCargo.CargoId == packet.CargoId)
+            {
+                currentCargo.Sequence = packet.Sequence;
+                return;
+            }
+
+            RemoveCargoAttachment(packet.AgvId);
+        }
+
+        if (cargoPrefabs == null || cargoPrefabs.Length == 0)
+        {
+            Debug.LogError($"[Cargo] No cargo prefabs configured for agvID={packet.AgvId}.");
+            return;
+        }
+
+        int prefabIndex = (int)(packet.CargoId % (UInt32)cargoPrefabs.Length);
+        GameObject cargoPrefab = cargoPrefabs[prefabIndex];
+        if (cargoPrefab == null)
+        {
+            Debug.LogError(
+                $"[Cargo] Prefab slot {prefabIndex} is empty for cargoID={packet.CargoId}.");
+            return;
+        }
+
+        Transform cargoMount = CreateCargoMount(agvObject.transform);
+        GameObject cargoInstance = Instantiate(cargoPrefab, cargoMount, false);
+        cargoInstance.name = $"Cargo_[{packet.CargoId}]";
+        cargoInstance.transform.localPosition = cargoLocalPosition;
+        cargoInstance.transform.localRotation = Quaternion.Euler(cargoLocalEulerAngles);
+        cargoInstance.transform.localScale = cargoLocalScale;
+        DisableCargoPhysics(cargoInstance);
+
+        m_CargoByAgvID[packet.AgvId] = new CargoAttachment
+        {
+            TaskId = packet.TaskId,
+            CargoId = packet.CargoId,
+            Sequence = packet.Sequence,
+            Instance = cargoInstance
+        };
+
+        Debug.Log(
+            $"[Cargo] LOADED agvID={packet.AgvId} taskID={packet.TaskId} " +
+            $"cargoID={packet.CargoId} nodeID={packet.NodeId} sequence={packet.Sequence} " +
+            $"prefab={cargoPrefab.name}");
+    }
+
+    private void ApplyUnloadedCargo(CargoStatePacket packet)
+    {
+        if (m_CargoByAgvID.TryGetValue(packet.AgvId, out CargoAttachment currentCargo) &&
+            currentCargo.TaskId == packet.TaskId && currentCargo.CargoId == packet.CargoId)
+        {
+            RemoveCargoAttachment(packet.AgvId);
+        }
+
+        Debug.Log(
+            $"[Cargo] UNLOADED agvID={packet.AgvId} taskID={packet.TaskId} " +
+            $"cargoID={packet.CargoId} nodeID={packet.NodeId} sequence={packet.Sequence}");
+    }
+
+    private Transform CreateCargoMount(Transform agvTransform)
+    {
+        GameObject mountObject = new GameObject("CargoMount");
+        Transform mount = mountObject.transform;
+        mount.SetParent(agvTransform, false);
+        mount.localPosition = cargoMountLocalPosition;
+        mount.localRotation = Quaternion.identity;
+
+        Vector3 agvScale = agvTransform.localScale;
+        mount.localScale = new Vector3(
+            SafeReciprocal(agvScale.x),
+            SafeReciprocal(agvScale.y),
+            SafeReciprocal(agvScale.z));
+        return mount;
+    }
+
+    private static float SafeReciprocal(float value)
+    {
+        return Mathf.Abs(value) > Mathf.Epsilon ? 1.0f / value : 1.0f;
+    }
+
+    private static void DisableCargoPhysics(GameObject cargoInstance)
+    {
+        foreach (Collider collider in cargoInstance.GetComponentsInChildren<Collider>(true))
+        {
+            collider.enabled = false;
+        }
+
+        foreach (Rigidbody rigidbody in cargoInstance.GetComponentsInChildren<Rigidbody>(true))
+        {
+            rigidbody.useGravity = false;
+            rigidbody.isKinematic = true;
+            rigidbody.detectCollisions = false;
+        }
+    }
+
+    private void RemoveCargoAttachment(UInt32 agvID)
+    {
+        if (!m_CargoByAgvID.TryGetValue(agvID, out CargoAttachment cargo))
+        {
+            return;
+        }
+
+        if (cargo.Instance != null)
+        {
+            Transform mount = cargo.Instance.transform.parent;
+            Destroy(cargo.Instance);
+            if (mount != null && mount.name == "CargoMount")
+            {
+                Destroy(mount.gameObject);
+            }
+        }
+
+        m_CargoByAgvID.Remove(agvID);
+    }
+
+    private void ClearCargoSessionState()
+    {
+        UInt32[] agvIDs = new UInt32[m_CargoByAgvID.Count];
+        m_CargoByAgvID.Keys.CopyTo(agvIDs, 0);
+        foreach (UInt32 agvID in agvIDs)
+        {
+            RemoveCargoAttachment(agvID);
+        }
+
+        m_PendingCargoByAgvID.Clear();
+        m_LastCargoSequenceByAgvID.Clear();
     }
 
     public void UpdateVisionObservation(VisionObservationPacket packet)
@@ -417,6 +623,8 @@ public class RenderManager : MonoBehaviour
 
     private void OnDestroy()
     {
+        ClearCargoSessionState();
+
         foreach (List<Material> materials in m_VisionMaterials.Values)
         {
             foreach (Material material in materials)

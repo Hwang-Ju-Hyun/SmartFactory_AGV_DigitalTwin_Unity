@@ -13,6 +13,7 @@ public enum PACKET_TYPE : byte
     PT_READY_MAP = 4,
     PT_READY_OBJECT = 5,
     PT_VISION_OBSERVATION = 6,
+    PT_CARGO_STATE = 7,
 
     // Deprecated legacy robot IDs. The Unity viewer never uses RobotProtocol.
     PT_ROUTE = 10,
@@ -167,6 +168,8 @@ public class NetworkManagerClient : MonoBehaviour
 
     public TCPSession ConnectToServer()
     {
+        RenderManager.Instance?.BeginCargoSession();
+
         string serverAddress = m_ServerAddress.Trim();
         m_Client = new TcpClient
         {
@@ -209,6 +212,9 @@ public class NetworkManagerClient : MonoBehaviour
             case PACKET_TYPE.PT_VISION_OBSERVATION:
                 HandleVisionObservationPacket(inStream);
                 break;
+            case PACKET_TYPE.PT_CARGO_STATE:
+                HandleCargoStatePacket(inStream);
+                break;
             default:
                 EnqueueNetworkEvent(new NetworkActionEvent(
                     () => Debug.LogWarning($"[Viewer] Ignored legacy packet type {(byte)packetType}.")));
@@ -220,7 +226,11 @@ public class NetworkManagerClient : MonoBehaviour
     {
         UInt32 sessionID = inStream.ReadUInt32();
         EnqueueNetworkEvent(new NetworkActionEvent(
-            () => Debug.Log($"[Viewer] Legacy session accepted. sessionID={sessionID}.")));
+            () =>
+            {
+                RenderManager.Instance?.BeginCargoSession();
+                Debug.Log($"[Viewer] Legacy session accepted. sessionID={sessionID}.");
+            }));
     }
 
     private void HandleMapDataPacket(InputMemoryStream inStream)
@@ -308,6 +318,22 @@ public class NetworkManagerClient : MonoBehaviour
     {
         VisionObservationPacket packet = VisionObservationPacket.Deserialize(inStream);
         StoreLatestVisionObservation(new VisionObservationEvent(packet));
+    }
+
+    private void HandleCargoStatePacket(InputMemoryStream inStream)
+    {
+        try
+        {
+            CargoStatePacket packet = CargoStatePacket.Deserialize(inStream);
+            EnqueueNetworkEvent(new CargoStateEvent(packet));
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException || exception is EndOfStreamException)
+        {
+            string message = exception.Message;
+            EnqueueNetworkEvent(new NetworkActionEvent(
+                () => Debug.LogError($"[Cargo] Packet rejected: {message}")));
+        }
     }
 
     private void HandleMapRendered(int nodeCount, int linkCount)
@@ -460,6 +486,7 @@ public class NetworkManagerClient : MonoBehaviour
         }
 
         Debug.LogWarning($"[Viewer] Disconnected: {reason}");
+        RenderManager.Instance?.EndCargoSession();
         ShutdownConnection(false);
     }
 
@@ -484,6 +511,7 @@ public class NetworkManagerClient : MonoBehaviour
             return;
         }
 
+        RenderManager.Instance?.EndCargoSession();
         m_ShuttingDown = true;
         m_Session?.Stop();
         m_Client?.Close();

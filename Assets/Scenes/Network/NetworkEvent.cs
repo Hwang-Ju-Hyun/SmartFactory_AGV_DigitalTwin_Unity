@@ -1,6 +1,77 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
+
+public enum CargoLoadState : byte
+{
+    Unloaded = 0,
+    Loaded = 1
+}
+
+public readonly struct CargoStatePacket
+{
+    // NetworkManagerClient consumes the packet type before deserializing this payload.
+    public const int WirePayloadSize =
+        sizeof(UInt32) + sizeof(UInt32) + sizeof(UInt32) +
+        sizeof(UInt32) + sizeof(UInt32) + sizeof(byte);
+
+    public CargoStatePacket(
+        UInt32 sequence,
+        UInt32 agvID,
+        UInt32 taskID,
+        UInt32 cargoID,
+        UInt32 nodeID,
+        CargoLoadState state)
+    {
+        Sequence = sequence;
+        AgvId = agvID;
+        TaskId = taskID;
+        CargoId = cargoID;
+        NodeId = nodeID;
+        State = state;
+    }
+
+    public UInt32 Sequence { get; }
+    public UInt32 AgvId { get; }
+    public UInt32 TaskId { get; }
+    public UInt32 CargoId { get; }
+    public UInt32 NodeId { get; }
+    public CargoLoadState State { get; }
+
+    public static CargoStatePacket Deserialize(InputMemoryStream inStream)
+    {
+        if (inStream == null)
+        {
+            throw new ArgumentNullException(nameof(inStream));
+        }
+
+        if (inStream.Remaining != WirePayloadSize)
+        {
+            throw new InvalidDataException(
+                $"Invalid cargo state payload size: {inStream.Remaining}; expected {WirePayloadSize}.");
+        }
+
+        UInt32 sequence = inStream.ReadUInt32();
+        UInt32 agvID = inStream.ReadUInt32();
+        UInt32 taskID = inStream.ReadUInt32();
+        UInt32 cargoID = inStream.ReadUInt32();
+        UInt32 nodeID = inStream.ReadUInt32();
+        byte rawState = inStream.ReadByte();
+        if (rawState > (byte)CargoLoadState.Loaded)
+        {
+            throw new InvalidDataException($"Invalid cargo state value: {rawState}.");
+        }
+
+        return new CargoStatePacket(
+            sequence,
+            agvID,
+            taskID,
+            cargoID,
+            nodeID,
+            (CargoLoadState)rawState);
+    }
+}
 
 public interface INetworkEvent
 {
@@ -129,6 +200,26 @@ public sealed class VisionObservationEvent : INetworkEvent
         }
 
         RenderManager.Instance.UpdateVisionObservation(m_Packet);
+    }
+}
+
+public sealed class CargoStateEvent : INetworkEvent
+{
+    private readonly CargoStatePacket m_Packet;
+
+    public CargoStateEvent(CargoStatePacket packet)
+    {
+        m_Packet = packet;
+    }
+
+    public void Execute()
+    {
+        if (RenderManager.Instance == null)
+        {
+            throw new InvalidOperationException("RenderManager is not initialized.");
+        }
+
+        RenderManager.Instance.ApplyCargoState(m_Packet);
     }
 }
 

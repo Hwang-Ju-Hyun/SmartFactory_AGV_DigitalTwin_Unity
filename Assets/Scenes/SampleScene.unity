@@ -70252,6 +70252,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::RenderManager
   showRuntimeNodeVisuals: 0
   agvVerticalOffset: 0.03
+  cargoPrefabs:
+  - {fileID: 8616823808319995515, guid: 2bbf3381616564c4c99d243d8eda9503, type: 3}
+  - {fileID: 8616823808319995515, guid: a797a14e0af7aba40ae32396a5219f88, type: 3}
+  cargoMountLocalPosition: {x: 0, y: 1.6, z: 0}
+  cargoLocalPosition: {x: 0, y: 0, z: 0}
+  cargoLocalEulerAngles: {x: 0, y: 0, z: 0}
+  cargoLocalScale: {x: 2, y: 2, z: 2}
   agvPrefab: {fileID: 9092275558553888916, guid: 9178ab6116a0d0b40aaaa056f5e682b2, type: 3}
   defaultPrefab: {fileID: 1128315000588015130, guid: e64f87ad20e88624da4c32548aea00a9, type: 3}
   nodePrefab: {fileID: 0}
