@@ -35,3 +35,8 @@ separate WSL terminal if no physical ESP32 is connected as AGV 1:
 Expected concise Unity logs include connection, legacy session acceptance, map
 rendering, AGV 1 creation, and throttled AGV 1 position updates. Do not connect
 FakeRobot and the physical ESP32 simultaneously with AGV ID 1.
+
+## Engineering documentation
+
+- [전체 시스템 기술 기록](docs/SMART_FACTORY_AGV_PROJECT_RECORD.md)
+- [Unity 구현 및 문제 해결 기록](docs/UNITY_ENGINEERING_RECORD.md)
